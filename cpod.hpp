@@ -49,11 +49,6 @@ namespace cpod {
         floating_point_exponent   = 1 << 1,
     };
 
-    enum std_strng_output_flags {
-        string_raw         = 1 << 0, // Count newline as part of the string and add R() in string.
-        string_zero_ending = 1 << 1, // Add zero to the end of the string for someone's C-sick.
-    };
-
     namespace detail {
 
         // These are 'each-character' de-formatter, which means they will loop through the string buffer to remove
@@ -61,6 +56,7 @@ namespace cpod {
         void remove_string_comments(std::string& str);
         void remove_string_useless_spaces(std::string& str); // Including \n and \t and so on.
         void combine_multiline_string_quotes(std::string& str);
+        int  check_curly_bracket_matching(std::string_view rng);
         
         void text_basic_type_put(text_archive& a, std::string_view name, const char& v,               uint32_t flag);
         void text_basic_type_put(text_archive& a, std::string_view name, const unsigned char& v,      uint32_t flag);
@@ -102,18 +98,18 @@ namespace cpod {
         void text_basic_type_get(text_archive& a, std::string_view name, bool& v);
         void text_basic_type_get(text_archive& a, std::string_view name, char*& v);
 
-        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<char> v             );
-        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<unsigned char> v    );
-        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<short> v            );
-        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<unsigned short> v   );
-        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<int> v              );
-        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<unsigned int> v     );
-        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<long long> v        );
-        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<unsigned long long> v);
-        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<float> v            );
-        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<double> v           );
-        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<bool> v             );
-        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<char*> v            );
+        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<char>               & v);
+        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<unsigned char>      & v);
+        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<short>              & v);
+        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<unsigned short>     & v);
+        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<int>                & v);
+        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<unsigned int>       & v);
+        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<long long>          & v);
+        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<unsigned long long> & v);
+        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<float>              & v);
+        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<double>             & v);
+        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<bool>               & v);
+        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<char*>              & v);
         
     }
 
@@ -187,11 +183,6 @@ namespace cpod {
             return *this;
         }
         
-    };
-
-    class basic_binary_archive {
-        std::vector<char> content_;
-    public:
     };
     
 }

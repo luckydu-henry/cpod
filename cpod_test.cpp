@@ -3,6 +3,7 @@
 #include <array>
 #include <fstream>
 #include <sstream>
+#include <format>
 
 int main(int argc, char* argv[]) {
 
@@ -15,7 +16,16 @@ int main(int argc, char* argv[]) {
     // This step is necessary if you want to read data correctly.
     ti.normalize_content();
 
-    char g = 0;
-    ti.get("MyAge", g);
-    std::cout << "g = " << static_cast<int>(g) << std::endl;
+    std::array<short, 65536> buf;
+    char myage = 0;
+    auto rng = cpod::make_span(buf);
+    
+    ti
+    .get("TArray", rng)
+    .get("MyAge", myage)
+    ;
+    
+    std::ranges::copy(rng, std::ostream_iterator<short>(std::cout, ", "));
+    std::cout << std::endl;
+    std::cout << std::format("MyAge is {:d}", myage);
 }
