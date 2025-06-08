@@ -70,6 +70,12 @@ namespace cpod {
                         useless_spaces_prefix_check(i[-1])) {
                         ++i;
                         }
+                    // This is not quite elegant.
+                    const bool bool_check_true = std::string_view(j, j + 4) == "true";
+                    const bool bool_check_false = std::string_view(j, j + 5) == "false";
+                    if  (bool_check_false || bool_check_true) {
+                        --i; // Remove this additional space.
+                    }
                     j = str.erase(i, j);
                     i = j > str.begin() ? --i : i;
                 }
@@ -192,6 +198,7 @@ namespace cpod {
         void output_values(std::string_view name, const Ty* v) {
             
         }
+        
     };
 
     struct text_bool_output_formatter {
@@ -293,7 +300,6 @@ namespace cpod {
     input_single_value(std::string_view(big_range.data(), bracket_len), v[length - 1]); } while (false)
     
     struct text_integer_input_formatter : public text_input_formatter_base {
-
         template <std::integral Ty>
         void input_single_value(std::string_view range, Ty& v) {
             char         base = 10;
@@ -315,7 +321,18 @@ namespace cpod {
         void input_values(std::string_view name, Ty* v) {
             TEXT_INPUT_VALUES_TEMPLATE_DEFINE(name, v);
         }
-        
+    };
+
+    struct text_bool_input_formatter : public text_input_formatter_base {
+        void input_single_value(std::string_view range, bool& v) {
+            range = std::string_view(range.data(), range.size() - 1);
+            if (range == "true") { v = true; return ; }
+            if (range == "false") { v = false; return; }
+            throw std::invalid_argument("Boolean type can not get anything else but true or false!");
+        }
+        void input_values(std::string_view name, bool* v) {
+            TEXT_INPUT_VALUES_TEMPLATE_DEFINE(name, v);
+        }
     };
 
 #define TEXT_INTEGER_VALUES_OUT(ns, rs, l, d) \
@@ -465,6 +482,13 @@ while (false)
         TEXT_INTEGER_SINGLE_VALUE_IN("unsigned long;uint64_t");
     }
 
+    void detail::text_basic_type_get(text_archive& a, std::string_view name, bool& v) {
+        text_bool_input_formatter in;
+        in.type_string_aliases = "bool";
+        in.search_range     = a.content();
+        in.input_values(name, &v);
+    }
+
     void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<char>& v) {
         TEXT_INTEGER_ARRAY_VALUES_IN("char;int8_t");
     }
@@ -495,5 +519,14 @@ while (false)
     
     void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<unsigned long long>& v) {
         TEXT_INTEGER_ARRAY_VALUES_IN("unsigned long;uint64_t");
+    }
+
+    void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<bool>& v) {
+        text_bool_input_formatter in;
+        in.type_string_aliases = "bool";
+        in.is_range = true;
+        in.search_range     = a.content();
+        in.input_values(name, v.data());
+        v = std::remove_cvref_t<decltype(v)>(v.begin(), in.length);
     }
 }
