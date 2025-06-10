@@ -1,9 +1,29 @@
-﻿#pragma once
+﻿//
+// MIT License
+//
+// Copyright (c) 2025 Henry Du
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+//
+#pragma once
 
-#include <charconv>         // We use charconv to deal with text 
 #include <string>
-#include <type_traits>
-#include <unordered_map>    // In registry.
 #include <span>
 #include <ranges>
 
@@ -22,10 +42,16 @@ namespace cpod {
         std::is_same_v<Ty, int>       || std::is_same_v<Ty, unsigned int>       ||
         std::is_same_v<Ty, long long> || std::is_same_v<Ty, unsigned long long> ||
         std::is_same_v<Ty, float>     || std::is_same_v<Ty, double>             ||
-        std::is_same_v<Ty, bool>      || std::is_same_v<Ty, char*>;
+        std::is_same_v<Ty, bool>      || std::is_same_v<Ty, std::string>;
 
     template <typename Ty>
-    concept span_type = requires (Ty t) { t.data(); t.size();};
+    struct is_span_type : std::false_type {};
+
+    template <typename Ty>
+    struct is_span_type<std::span<Ty>> : std::true_type {};
+
+    template <class Ty>
+    concept span_type = is_span_type<Ty>::value;
     
     // Serializer handles struct as its unique unit.
     // Each struct contains only basic types and string and arrays.
@@ -45,8 +71,9 @@ namespace cpod {
     };
 
     enum std_floating_point_output_flags {
-        floating_point_fixed      = 1 << 0, // Clip if out of range and fill 0 if not enough.
-        floating_point_exponent   = 1 << 1,
+        floating_point_fixed             = 1 << 0, // Clip if out of range and fill 0 if not enough.
+        floating_point_scientific        = 1 << 1,
+        floating_point_char_upper        = 1 << 3
     };
 
     namespace detail {
@@ -69,7 +96,7 @@ namespace cpod {
         void text_basic_type_put(text_archive& a, std::string_view name, const float& v,              uint32_t flag);
         void text_basic_type_put(text_archive& a, std::string_view name, const double& v,             uint32_t flag);
         void text_basic_type_put(text_archive& a, std::string_view name, const bool& v,               uint32_t flag);
-        void text_basic_type_put(text_archive& a, std::string_view name, const char*& v,              uint32_t flag);
+        void text_basic_type_put(text_archive& a, std::string_view name, const std::string& v,        uint32_t flag);
 
         // We use std::span to represent array types.
         void text_basic_type_span_put(text_archive& a, std::string_view name, std::span<char> v,                uint32_t flag);
@@ -83,7 +110,7 @@ namespace cpod {
         void text_basic_type_span_put(text_archive& a, std::string_view name, std::span<float> v,               uint32_t flag);
         void text_basic_type_span_put(text_archive& a, std::string_view name, std::span<double> v,              uint32_t flag);
         void text_basic_type_span_put(text_archive& a, std::string_view name, std::span<bool> v,                uint32_t flag);
-        void text_basic_type_span_put(text_archive& a, std::string_view name, std::span<char*> v,               uint32_t flag);
+        void text_basic_type_span_put(text_archive& a, std::string_view name, std::span<std::string> v,         uint32_t flag);
 
         void text_basic_type_get(text_archive& a, std::string_view name, char& v);
         void text_basic_type_get(text_archive& a, std::string_view name, unsigned char& v);
@@ -96,7 +123,7 @@ namespace cpod {
         void text_basic_type_get(text_archive& a, std::string_view name, float& v);
         void text_basic_type_get(text_archive& a, std::string_view name, double& v);
         void text_basic_type_get(text_archive& a, std::string_view name, bool& v);
-        void text_basic_type_get(text_archive& a, std::string_view name, char*& v);
+        void text_basic_type_get(text_archive& a, std::string_view name, std::string& v);
 
         void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<char>               & v);
         void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<unsigned char>      & v);
@@ -109,7 +136,7 @@ namespace cpod {
         void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<float>              & v);
         void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<double>             & v);
         void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<bool>               & v);
-        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<char*>              & v);
+        void text_basic_type_span_get(text_archive& a, std::string_view name, std::span<std::string>        & v);
         
     }
 
@@ -140,7 +167,7 @@ namespace cpod {
             return app(s);
         }
 
-       void          normalize_content() {
+       void          normalize() {
             // Normalize passes.
             detail::remove_string_comments(content_);
             detail::remove_string_useless_spaces(content_);
@@ -149,7 +176,7 @@ namespace cpod {
         
         template <typename Ty>
         text_archive& put(std::string_view name, const Ty& a, uint32_t flag = 0) {
-            using type = std::remove_all_extents_t<Ty>;
+            using type = std::remove_cvref_t<Ty>;
             // Range type.
             if constexpr (span_type<type>) {
                 static_assert(basic_serializable_types<typename type::value_type>);
@@ -169,7 +196,7 @@ namespace cpod {
         template <typename Ty>
         text_archive& get(std::string_view name, Ty& a) {
             // We assume this method handles buffer that already normalized.
-            using type = std::remove_all_extents_t<Ty>;
+            using type = std::remove_cvref_t<Ty>;
             // Range type.
             if constexpr (span_type<type>) {
                 static_assert(basic_serializable_types<typename type::value_type>);

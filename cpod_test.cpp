@@ -9,31 +9,44 @@ int main(int argc, char* argv[]) {
 
     std::ifstream ifs("TestFile.cpod.cpp");
     std::stringstream iss;
-    iss << ifs.rdbuf();
+
+    // Remove macro defines.
+    for (std::string line; std::getline(ifs, line);) {
+        if (line[0] != '#' && line != "using namespace std;") {
+            iss  << line << "\n";
+        } 
+    }
 
     cpod::text_archive ti(iss.str());
-    // Remove comments, useless spaces and other unrequired characters.
-    // This step is necessary if you want to read data correctly.
-    ti.normalize_content();
-    std::cout << ti.content() << std::endl;
+    ti.normalize();
 
-    std::array<short, 65536> buf;
-    std::array<bool, 10> bbuf;
-    char myage = 0;
-    bool AmIaBoy = false;
-    auto rng = cpod::make_span(buf);
-    auto brg = cpod::make_span(bbuf);
+    // Next we will load data from archive to these variables.
+    // Variable types must be same
+    std::string                  myName;          
+    int                          myAge;           
+    bool                         amIaBoy;         
+    std::array<std::string, 2>   myEmails;     
+    float                        myHeight;        
+    float                        myWidth;
+
+    auto emailSpan = cpod::make_span(myEmails);
     
     ti
-    .get("TArray", rng)
-    .get("MyAge", myage)
-    .get("AmIaBoy", AmIaBoy)
-    .get("LightStates", brg)
-    ;
+    .get("myName", myName)
+    .get("myAge", myAge)
+    .get("amIaBoy", amIaBoy)
+    .get("myHeight", myHeight)
+    .get("myWidth", myWidth)
+    .get("myEmails", emailSpan);
+
+
+    std::cout << "Personal info: \n" << std::boolalpha
+              << "Name:        " << myName   << '\n'
+              << "Age:         " << myAge    << '\n'
+              << "Height:      " << myHeight << '\n'
+              << "Width:       " << myWidth  << '\n'
+              << "Am I a boy:  " << amIaBoy  << '\n'
+              << "Emails: \n";
+    for (auto& i : myEmails) { std::cout << '\t' << i << std::endl; }
     
-    std::ranges::copy(rng, std::ostream_iterator<short>(std::cout, ", "));
-    std::cout << std::endl;
-    std::cout << std::format("MyAge is {:d}", myage) << std::endl;
-    std::cout << std::format("Am I a boy ? : {}", AmIaBoy) << std::endl << std::boolalpha;
-    std::ranges::copy(brg, std::ostream_iterator<bool>(std::cout, ", "));
 }

@@ -1,6 +1,31 @@
-﻿#include "cpod.hpp"
+﻿//
+// MIT License
+//
+// Copyright (c) 2025 Henry Du
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+//
 #include <algorithm>
 #include <stdexcept>
+#include <charconv>  // from_chars and to_chars
+
+#include "cpod.hpp"
 
 namespace cpod {
 
@@ -47,9 +72,8 @@ namespace cpod {
             }
         }
     }
-
-    static inline bool  useless_spaces_prefix_check(const char c) { return c != ';' && c != '{' && c != '}'; }
     
+#define USELESS_SPACES_PREFIX_CHECK(c) ((c) != ';' && (c) != '{' && (c) != '}')
     void detail::remove_string_useless_spaces(std::string& str) {
         // Remove space characters at the end since *end() can't be empty.
         for (std::int8_t
@@ -67,7 +91,7 @@ namespace cpod {
                 if (std::isspace(*i)) {
                     auto j = std::find_if_not(i, str.end(), std::isspace);
                     if ((std::isalpha(*j) || *j == '_') && i != str.begin() &&
-                        useless_spaces_prefix_check(i[-1])) {
+                        USELESS_SPACES_PREFIX_CHECK(i[-1])) {
                         ++i;
                         }
                     // This is not quite elegant.
@@ -186,47 +210,75 @@ namespace cpod {
 
     struct text_float_output_formatter {
         std::size_t      length = 0; // length == 0 means raw array output;
-        std::uint32_t    flag; 
+        std::uint32_t    flag;
+        const char*      type_str;
         text_archive*    archive_ptr;
 
         template <std::floating_point Ty>
         void output_single_value(const Ty& v) {
-            
-        }
+            std::chars_format fmt = std::chars_format::general;
+            if (flag & floating_point_fixed)      { fmt = std::chars_format::fixed; }
+            if (flag & floating_point_scientific) { fmt = std::chars_format::scientific; }
 
+            char  value[512] = "\0";
+            char* value_end = std::to_chars(value, value + 512, v, fmt).ptr;
+            // Change exponent to upper case.
+            if (flag & floating_point_char_upper)  {
+                *std::find(value, value_end, 'e') = 'E';
+            }
+            archive_ptr->content().append(value, value_end - value);
+        }
         template <std::floating_point Ty>
         void output_values(std::string_view name, const Ty* v) {
-            
+            TEXT_OUTPUT_VALUES_TEMPLATE_DEFINE(name, v, type_str);
         }
-        
     };
 
     struct text_bool_output_formatter {
         std::size_t      length = 0;
         text_archive*    archive_ptr;
-
         void output_single_value(const bool& v) {
             const char* bool_str = v ? "true" : "false";
             archive_ptr->content().append(bool_str);
         }
-
         void output_values(std::string_view name, const bool* values) {
             TEXT_OUTPUT_VALUES_TEMPLATE_DEFINE(name, values, "bool");
         }
-        
     };
 
+    // Raw string is not supported for now.
     struct text_string_output_formatter {
         std::size_t      length = 0;
-        std::uint32_t    flag;
         text_archive*    archive_ptr;
 
-        void output_single_value(const char*& v) {
-            
+        template <class Alloc>
+        void output_single_value(const std::basic_string<char, std::char_traits<char>, Alloc>& v) {
+            // Do string handling.
+            std::basic_string<char, std::char_traits<char>, Alloc> strbuf(v.size() + 2, '\0');
+            std::copy_n(v.begin(), v.size(), strbuf.begin() + 1);
+#define OUTPUT_CHANGE_CASE(cs, c, it) case cs : *it = c; it = strbuf.insert(it, '\\'); ++it; break 
+            for (auto i = strbuf.begin(); i != strbuf.end(); ++i) {
+                switch (*i) {
+                    default: break;
+                    OUTPUT_CHANGE_CASE('\"', '\"', i);
+                    OUTPUT_CHANGE_CASE('\\', '\\', i);
+                    OUTPUT_CHANGE_CASE('\t',  't', i);
+                    OUTPUT_CHANGE_CASE('\n',  'n', i);
+                    OUTPUT_CHANGE_CASE('\r',  'r', i);
+                    OUTPUT_CHANGE_CASE('\v',  'v', i);
+                    OUTPUT_CHANGE_CASE('\f',  'f', i);
+                    OUTPUT_CHANGE_CASE('\a',  'a', i);
+                    OUTPUT_CHANGE_CASE('\b',  'b', i);
+                }
+            }
+            // Add quote.
+            strbuf.front() = '\"';
+            strbuf.back()  = '\"';
+            archive_ptr->content().append(strbuf);
         }
-
-        void output_values(std::string_view name, const char** values) {
-            
+        template <class Alloc>
+        void output_values(std::string_view name, const std::basic_string<char, std::char_traits<char>, Alloc>* values) {
+            TEXT_OUTPUT_VALUES_TEMPLATE_DEFINE(name, values, "string");
         }
         
     };
@@ -234,7 +286,7 @@ namespace cpod {
     ////////////////////////////////////
     /// Input Formatter
     ////////////////////////////////////
-
+    
     struct text_input_formatter_base {
         std::string_view search_range;
         std::string_view type_string_aliases;
@@ -242,7 +294,9 @@ namespace cpod {
         bool             is_range = false;
 
         std::string_view search_value_range(std::string_view name) {
+            // TODO: MAKE IT UTF-8 SAFE!
             using view = std::string_view;
+            // Get aliases range.
             auto alias_subrange =  type_string_aliases
             | std::views::split(';')
             | std::views::transform([name](const auto& s) {
@@ -269,7 +323,7 @@ namespace cpod {
                         std::from_chars(search_range.data() + off, search_range.data() + index_end, length);
                         return view(search_range.data() + index_end + 3, end - index_end - 3);
                     }
-                    // Means we need further searching.
+                    // Means a need for further searching.
                     search_range = view(search_range.begin() + static_cast<std::ptrdiff_t>(off), search_range.end());
                 } // for (search_range)
                 result_mask |= (1 << std::distance(alias_subrange.begin(), i));
@@ -335,6 +389,51 @@ namespace cpod {
         }
     };
 
+    struct text_string_input_formatter : text_input_formatter_base {
+        template <class Alloc>
+        void input_single_value(std::string_view range, std::basic_string<char, std::char_traits<char>, Alloc>& v) {
+            // Ignore two quotes.
+            v = std::string_view(range.data() + 1, range.size() - 3);
+            for (auto i = v.begin(); i != v.end(); ++i) {
+                if (*i == '\\') {
+                    i = v.erase(i);
+                    switch (*i) {
+                    default:
+                    case '\"':
+                    case '\\': break;
+                    case 't': *i = '\t'; break;
+                    case 'n': *i = '\n'; break;
+                    case 'r': *i = '\r'; break;
+                    case 'v': *i = '\v'; break;
+                    case 'f': *i = '\f'; break;
+                    case 'a': *i = '\a'; break;
+                    case 'b': *i = '\b'; break;
+                    }
+                }
+            }
+        }
+        template <class Alloc>
+        void input_values(std::string_view name, std::basic_string<char, std::char_traits<char>, Alloc>* v) {
+            TEXT_INPUT_VALUES_TEMPLATE_DEFINE(name, v);
+        }
+    };
+
+    struct text_float_input_formatter : text_input_formatter_base {
+        template <std::floating_point Ty>
+        void input_single_value(std::string_view range, Ty& v) {
+            range = std::string_view(range.data(), range.size() - 1);
+            if (auto res = std::from_chars(range.data(), range.data() + range.size(), v, std::chars_format::general); res.ec != std::errc()) {
+                const std::string msg =
+                    "Invalid floating point value (" + std::to_string(static_cast<int>(res.ec)) + ")!, probably missing ';' after variable field!";
+                throw std::invalid_argument(msg);
+            }
+        }
+        template <std::floating_point Ty>
+        void input_values(std::string_view name, Ty* v) {
+            TEXT_INPUT_VALUES_TEMPLATE_DEFINE(name, v);
+        }
+    };
+
 #define TEXT_INTEGER_VALUES_OUT(ns, rs, l, d) \
 do {                                 \
 text_integer_output_formatter out;   \
@@ -378,8 +477,33 @@ while (false)
         TEXT_INTEGER_VALUES_OUT("uint64_t", "unsigned long", 0, &v);
     }
 
+    void detail::text_basic_type_put(text_archive& a, std::string_view name, const float& v, uint32_t flag) {
+        text_float_output_formatter out;
+        out.archive_ptr = &a;
+        out.flag = flag;
+        out.length = 0;
+        out.type_str = "float";
+        out.output_values(name, &v);
+    }
+
+    void detail::text_basic_type_put(text_archive& a, std::string_view name, const double& v, uint32_t flag) {
+        text_float_output_formatter out;
+        out.archive_ptr = &a;
+        out.flag = flag;
+        out.length = 0;
+        out.type_str = "double";
+        out.output_values(name, &v);
+    }
+
     void detail::text_basic_type_put(text_archive& a, std::string_view name, const bool& v, uint32_t flag) {
         text_bool_output_formatter out;
+        out.archive_ptr = &a;
+        out.length = 0;
+        out.output_values(name, &v);
+    }
+
+    void detail::text_basic_type_put(text_archive& a, std::string_view name, const std::string& v, uint32_t flag) {
+        text_string_output_formatter out;
         out.archive_ptr = &a;
         out.length = 0;
         out.output_values(name, &v);
@@ -421,6 +545,24 @@ while (false)
         TEXT_INTEGER_VALUES_OUT("uint64_t", "unsigned long", v.size(), v.data());
     }
 
+    void detail::text_basic_type_span_put(text_archive& a, std::string_view name, std::span<float> v, uint32_t flag) {
+        text_float_output_formatter out;
+        out.archive_ptr   = &a;
+        out.length        = v.size();
+        out.flag          = flag;
+        out.type_str      = "float";
+        out.output_values(name, v.data());
+    }
+    
+    void detail::text_basic_type_span_put(text_archive& a, std::string_view name, std::span<double> v, uint32_t flag) {
+        text_float_output_formatter out;
+        out.archive_ptr   = &a;
+        out.length        = v.size();
+        out.flag          = flag;
+        out.type_str      = "double";
+        out.output_values(name, v.data());
+    }
+
     void detail::text_basic_type_span_put(text_archive& a, std::string_view name, std::span<bool> v, uint32_t flag) {
         text_bool_output_formatter out;
         out.archive_ptr   = &a;
@@ -428,17 +570,24 @@ while (false)
         out.output_values(name, v.data());
     }
 
-#define TEXT_INTEGER_SINGLE_VALUE_IN(ts)     \
+    void detail::text_basic_type_span_put(text_archive& a, std::string_view name, std::span<std::string> v, uint32_t flag) {
+        text_string_output_formatter out;
+        out.archive_ptr   = &a;
+        out.length        = v.size();
+        out.output_values(name, v.data());
+    }
+
+#define TEXT_SINGLE_VALUE_IN(formatter, ts)     \
     do {                                     \
-        text_integer_input_formatter in;     \
+        text_##formatter##_input_formatter in;     \
         in.type_string_aliases = ts;         \
         in.search_range     = a.content();   \
         in.input_values(name, &v);           \
     } while (false) 
 
-#define TEXT_INTEGER_ARRAY_VALUES_IN(ts)     \
+#define TEXT_ARRAY_VALUES_IN(formatter, ts)     \
     do {                                     \
-        text_integer_input_formatter in;     \
+        text_##formatter##_input_formatter in;     \
         in.type_string_aliases = ts;         \
         in.is_range = true;                  \
         in.search_range     = a.content();   \
@@ -451,82 +600,98 @@ while (false)
     ///////////////////////////////////////////
     
     void detail::text_basic_type_get(text_archive& a, std::string_view name, char& v) {
-        TEXT_INTEGER_SINGLE_VALUE_IN("char;int8_t");
+        TEXT_SINGLE_VALUE_IN(integer, "int8_t;char");
     }
 
     void detail::text_basic_type_get(text_archive& a, std::string_view name, unsigned char& v) {
-        TEXT_INTEGER_SINGLE_VALUE_IN("unsigned char;uint8_t");
+        TEXT_SINGLE_VALUE_IN(integer, "uint8_t;unsigned char");
     }
     
     void detail::text_basic_type_get(text_archive& a, std::string_view name, short& v) {
-        TEXT_INTEGER_SINGLE_VALUE_IN("short;int16_t");
+        TEXT_SINGLE_VALUE_IN(integer,"int16_t;short");
     }
     
     void detail::text_basic_type_get(text_archive& a, std::string_view name, unsigned short& v) {
-        TEXT_INTEGER_SINGLE_VALUE_IN("unsigned short;uint16_t");
+        TEXT_SINGLE_VALUE_IN(integer,"uint16_t;unsigned short");
     }
     
     void detail::text_basic_type_get(text_archive& a, std::string_view name, int& v) {
-        TEXT_INTEGER_SINGLE_VALUE_IN("int;int32_t");
+        TEXT_SINGLE_VALUE_IN(integer,"int;int32_t");
     }
     
     void detail::text_basic_type_get(text_archive& a, std::string_view name, unsigned int& v) {
-        TEXT_INTEGER_SINGLE_VALUE_IN("unsigned int;uint32_t");
+        TEXT_SINGLE_VALUE_IN(integer,"uint32_t;unsigned int");
     }
     
     void detail::text_basic_type_get(text_archive& a, std::string_view name, long long& v) {
-        TEXT_INTEGER_SINGLE_VALUE_IN("long;int64_t");
+        TEXT_SINGLE_VALUE_IN(integer,"int64_t;long");
     }
     
     void detail::text_basic_type_get(text_archive& a, std::string_view name, unsigned long long& v) {
-        TEXT_INTEGER_SINGLE_VALUE_IN("unsigned long;uint64_t");
+        TEXT_SINGLE_VALUE_IN(integer,"uint64_t;unsigned long");
+    }
+
+    void detail::text_basic_type_get(text_archive& a, std::string_view name, float& v) {
+        TEXT_SINGLE_VALUE_IN(float, "float");
+    }
+    
+    void detail::text_basic_type_get(text_archive& a, std::string_view name, double& v) {
+        TEXT_SINGLE_VALUE_IN(float, "double");
     }
 
     void detail::text_basic_type_get(text_archive& a, std::string_view name, bool& v) {
-        text_bool_input_formatter in;
-        in.type_string_aliases = "bool";
-        in.search_range     = a.content();
-        in.input_values(name, &v);
+        TEXT_SINGLE_VALUE_IN(bool, "bool");
+    }
+
+    void detail::text_basic_type_get(text_archive& a, std::string_view name, std::string& v) {
+        TEXT_SINGLE_VALUE_IN(string, "string");
     }
 
     void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<char>& v) {
-        TEXT_INTEGER_ARRAY_VALUES_IN("char;int8_t");
+        TEXT_ARRAY_VALUES_IN(integer,"int8_t;char");
     }
 
     void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<unsigned char>& v) {
-        TEXT_INTEGER_ARRAY_VALUES_IN("unsigned char;uint8_t");
+        TEXT_ARRAY_VALUES_IN(integer,"uint8_t;unsigned char");
     }
     
     void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<short>& v) {
-        TEXT_INTEGER_ARRAY_VALUES_IN("short;int16_t");
+        TEXT_ARRAY_VALUES_IN(integer,"int16_t;short");
     }
     
     void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<unsigned short>& v) {
-        TEXT_INTEGER_ARRAY_VALUES_IN("unsigned short;uint16_t");
+        TEXT_ARRAY_VALUES_IN(integer,"uint16_t;unsigned short");
     }
     
     void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<int>& v) {
-        TEXT_INTEGER_ARRAY_VALUES_IN("int;int32_t");
+        TEXT_ARRAY_VALUES_IN(integer,"int;int32_t");
     }
     
     void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<unsigned int>& v) {
-        TEXT_INTEGER_ARRAY_VALUES_IN("unsigned int;uint32_t");
+        TEXT_ARRAY_VALUES_IN(integer,"uint32_t;unsigned int");
     }
     
     void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<long long>& v) {
-        TEXT_INTEGER_ARRAY_VALUES_IN("long;int64_t");
+        TEXT_ARRAY_VALUES_IN(integer,"int64_t;long");
     }
     
     void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<unsigned long long>& v) {
-        TEXT_INTEGER_ARRAY_VALUES_IN("unsigned long;uint64_t");
+        TEXT_ARRAY_VALUES_IN(integer,"uint64_t;unsigned long");
+    }
+
+    void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<float>& v) {
+        TEXT_ARRAY_VALUES_IN(float, "float");
+    }
+    
+    void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<double>& v) {
+        TEXT_ARRAY_VALUES_IN(float, "double");
     }
 
     void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<bool>& v) {
-        text_bool_input_formatter in;
-        in.type_string_aliases = "bool";
-        in.is_range = true;
-        in.search_range     = a.content();
-        in.input_values(name, v.data());
-        v = std::remove_cvref_t<decltype(v)>(v.begin(), in.length);
+        TEXT_ARRAY_VALUES_IN(bool, "bool");
+    }
+
+    void detail::text_basic_type_span_get(text_archive& a, std::string_view name, std::span<std::string>& v) {
+        TEXT_ARRAY_VALUES_IN(string, "string");
     }
 }
