@@ -20,6 +20,8 @@ int main(int argc, char* argv[]) {
     
     cpod::text_archive ti(iss.str());
     ti.normalize();
+
+    std::cout << ti.content() << std::endl;
     
     // Next we will load data from archive to these variables.
     // Variable types must be same
@@ -29,6 +31,7 @@ int main(int argc, char* argv[]) {
     float                        myHeight;        
     float                        myWidth;
     std::set<std::string>        myEmails;
+    std::string                  shaderCode;
     
     ti
     .get("myName", myName)
@@ -36,7 +39,8 @@ int main(int argc, char* argv[]) {
     .get("amIaBoy", amIaBoy)
     .get("myHeight", myHeight)
     .get("myWidth", myWidth)
-    .get("myEmails", myEmails);
+    .get("myEmails", myEmails)
+    .get("shaderCode", shaderCode);
     
     std::cout << "Personal info: \n" << std::boolalpha
               << "Name:        " << myName   << '\n'
@@ -46,6 +50,9 @@ int main(int argc, char* argv[]) {
               << "Am I a boy:  " << amIaBoy  << '\n'
               << "Emails: " << '\n';
     for (auto& i : myEmails) { std::cout << '\t' << i << '\n'; }
+
+    std::cout << "----------This is a vertex shader-------------\n";
+    std::cout << shaderCode << std::endl;
 
     // cpod::text_archive archive;
     // archive.put("HiThere", std::unordered_set<float>{1.15F, 2.26F});

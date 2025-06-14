@@ -9,6 +9,8 @@ using namespace std;
 * Comment handle and string handle are also capable, anyway see for yourself
 * ***********************************************************************/
 
+pair<string, float> p = {"Hello world!", 1.234F};
+
 string myName          = "Henry Du";
 int    myAge           = 17;
 bool   amIaBoy         = true;
@@ -20,3 +22,9 @@ string myEmails[4]     = {
     "13552325266@163.com",
     "18516915799@126.com"
 };
+
+string shaderCode = 
+"layout(location = 0) vec3 position;\n"
+"void main() {\n"
+"    gl_Position = vec4(position, 1.0);\n"
+"}";

@@ -23,80 +23,106 @@
 //
 #pragma once
 
+// Core headers
 #include <string>
-#include <span>
 #include <ranges>
-#include <vector>
+#include <utility>
 #include <algorithm>
 #include <stdexcept>
 #include <charconv>  // from_chars and to_chars
 
+// Container support headers.
 #include <array>
-#include <span>
 #include <vector>
+#include <span>
 #include <deque>
 #include <list>
 #include <forward_list>
 #include <set>
 #include <unordered_set>
 
+#include "cpod.hpp"
 
 namespace cpod {
 
-    // A registry contains all your types that would be processed by the archive.
     class text_archive;
     class binary_archive;
 
     template <class Ty>
-    struct std_string_traits : std::false_type {};
+    struct std_string_type_traits : std::false_type {};
 
     template <typename CharT, template <class> class Allocator>
-    struct std_string_traits<std::basic_string<CharT, std::char_traits<CharT>, Allocator<CharT>>> : std::true_type {};
+    struct std_string_type_traits<std::basic_string<CharT, std::char_traits<CharT>, Allocator<CharT>>> : std::true_type {
+        static constexpr bool is_view = false;
+    };
 
+    template <typename CharT>
+    struct std_string_type_traits<std::basic_string_view<CharT, std::char_traits<CharT>>> : std::true_type {
+        static constexpr bool is_view = true;
+    };
+
+    template <class Ty>
+    struct std_structured_binding_type_traits : std::false_type {};
+
+    template <typename K, typename V>
+    struct std_structured_binding_type_traits<std::pair<K, V>> : std::true_type {
+        static constexpr bool is_pair = true;
+    };
+
+    template <typename ... Types>
+    struct std_structured_binding_type_traits<std::tuple<Types...>> : std::true_type {
+        static constexpr bool          is_pair = false;
+        static constexpr std::size_t   length  = sizeof...(Types);
+    };
+    
     // We don't have std::(multi)map or std::unordered_(multi)map support.
     // Since maps are very special, you might want to serialize them with a particular custom struct.
     template <class Ty>
-    struct forward_sequential_container_traits : std::false_type {};
+    struct std_forward_container_type_traits : std::false_type {};
 
     // Two static container
     template <class Ty, std::size_t N>
-    struct forward_sequential_container_traits<std::array<Ty, N>> : std::true_type {
+    struct std_forward_container_type_traits<std::array<Ty, N>> : std::true_type {
         static constexpr std::string_view name = "std::array";
     };
 
     template <class Ty, std::size_t N>
-    struct forward_sequential_container_traits<std::span<Ty, N>>  : std::true_type {
+    struct std_forward_container_type_traits<std::span<Ty, N>>  : std::true_type {
         static constexpr std::string_view name = "std::span";
     };
 
     // We don't have container adaptors supportness i.e. stack and queue and future flat_map flat_set.
-#define DEFINE_DYNAMIC_FORWARD_SEQUENTIAL_CONTAINER_TRAIT(container) \
+#define SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(container) \
     template <class Ty, template <class> class Allocator> \
-    struct forward_sequential_container_traits<container##<Ty, Allocator<Ty>>> : std::true_type { \
+    struct std_forward_container_type_traits<container##<Ty, Allocator<Ty>>> : std::true_type { \
         static constexpr std::string_view name = #container; \
     }
 
-    DEFINE_DYNAMIC_FORWARD_SEQUENTIAL_CONTAINER_TRAIT(std::vector);
-    DEFINE_DYNAMIC_FORWARD_SEQUENTIAL_CONTAINER_TRAIT(std::deque);
-    DEFINE_DYNAMIC_FORWARD_SEQUENTIAL_CONTAINER_TRAIT(std::list);
-    DEFINE_DYNAMIC_FORWARD_SEQUENTIAL_CONTAINER_TRAIT(std::forward_list);
-    DEFINE_DYNAMIC_FORWARD_SEQUENTIAL_CONTAINER_TRAIT(std::set);
-    DEFINE_DYNAMIC_FORWARD_SEQUENTIAL_CONTAINER_TRAIT(std::multiset);
-    DEFINE_DYNAMIC_FORWARD_SEQUENTIAL_CONTAINER_TRAIT(std::unordered_set);
-    DEFINE_DYNAMIC_FORWARD_SEQUENTIAL_CONTAINER_TRAIT(std::unordered_multiset);
+    SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::vector);
+    SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::deque);
+    SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::list);
+    SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::forward_list);
+    SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::set);
+    SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::multiset);
+    SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::unordered_set);
+    SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::unordered_multiset);
 
-#undef DEFINE_DYNAMIC_FORWARD_SEQUENTIAL_CONTAINER_TRAIT
-    template <class Ty>
-    concept forward_sequential_container = forward_sequential_container_traits<Ty>::value;
+#undef SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS
     
     template <typename Ty>
-    concept basic_serializable_types =
+    concept std_basic_type =
         std::is_same_v<Ty, char>      || std::is_same_v<Ty, unsigned char>      ||
         std::is_same_v<Ty, short>     || std::is_same_v<Ty, unsigned short>     ||
         std::is_same_v<Ty, int>       || std::is_same_v<Ty, unsigned int>       ||
         std::is_same_v<Ty, long long> || std::is_same_v<Ty, unsigned long long> ||
         std::is_same_v<Ty, float>     || std::is_same_v<Ty, double>             ||
-        std::is_same_v<Ty, bool>      || std_string_traits<Ty>::value;
+        std::is_same_v<Ty, bool>      || std_string_type_traits<Ty>::value;
+
+    template <typename Ty>
+    concept std_structure = std_structured_binding_type_traits<Ty>::value;
+    
+    template <class Ty>
+    concept std_forward_container = std_forward_container_type_traits<Ty>::value;
     
     // Serializer handles struct as its unique unit.
     // Each struct contains only basic types and string and arrays.
@@ -122,25 +148,46 @@ namespace cpod {
     };
 
     namespace detail {
-
-#define DEFINE_STD_INTEGER_TYPE_STRING(type, r, n)               \
-        template <> struct std_integer_type_string<type> {       \
-            static constexpr std::string_view raw     = r;       \
-            static constexpr std::string_view neat    = n;       \
-            static constexpr std::string_view aliases = r##";"##n; }
         
         template <class Ty>
-        struct std_integer_type_string {};
-        DEFINE_STD_INTEGER_TYPE_STRING(int8_t  , "int8_t"  , "char");
-        DEFINE_STD_INTEGER_TYPE_STRING(uint8_t , "uint8_t" , "unsigned char");
-        DEFINE_STD_INTEGER_TYPE_STRING(int16_t , "int16_t" , "short");
-        DEFINE_STD_INTEGER_TYPE_STRING(uint16_t, "uint16_t", "unsigned short");
-        DEFINE_STD_INTEGER_TYPE_STRING(int     , "int"     , "int32_t");
-        DEFINE_STD_INTEGER_TYPE_STRING(uint32_t, "uint32_t", "unsigned int");
-        DEFINE_STD_INTEGER_TYPE_STRING(int64_t , "int64_t" , "long long");
-        DEFINE_STD_INTEGER_TYPE_STRING(uint64_t, "uint64_t", "unsigned long long");
+        struct std_basic_type_string {};
+
+#define DEFINE_STD_TYPE_STRING_WITH_ALIASES(type, r, n)                         \
+        template <> struct std_basic_type_string<type> {                        \
+            static constexpr std::string_view raw                  = r;         \
+            static constexpr std::string_view neat                 = n;         \
+            static constexpr std::string_view aliases              = r##";"##n; \
+            static constexpr std::string_view default_name         = raw;       \
+        }
         
-#undef  DEFINE_STD_INTEGER_TYPE_STRING
+        DEFINE_STD_TYPE_STRING_WITH_ALIASES(int8_t  , "int8_t"  , "char");
+        DEFINE_STD_TYPE_STRING_WITH_ALIASES(uint8_t , "uint8_t" , "unsigned char");
+        DEFINE_STD_TYPE_STRING_WITH_ALIASES(int16_t , "int16_t" , "short");
+        DEFINE_STD_TYPE_STRING_WITH_ALIASES(uint16_t, "uint16_t", "unsigned short");
+        DEFINE_STD_TYPE_STRING_WITH_ALIASES(int     , "int"     , "int32_t");
+        DEFINE_STD_TYPE_STRING_WITH_ALIASES(uint32_t, "uint32_t", "unsigned int");
+        DEFINE_STD_TYPE_STRING_WITH_ALIASES(int64_t , "int64_t" , "long long");
+        DEFINE_STD_TYPE_STRING_WITH_ALIASES(uint64_t, "uint64_t", "unsigned long long");
+        // Future floating point may have these aliases but not now.
+        DEFINE_STD_TYPE_STRING_WITH_ALIASES(float   , "float"   , "float32_t");
+        DEFINE_STD_TYPE_STRING_WITH_ALIASES(double  , "double"  , "float64_t");
+
+        template <>
+        struct std_basic_type_string<bool> {
+            static constexpr std::string_view default_name = "bool";
+        };
+
+        template <template <class> class Allocator>
+        struct std_basic_type_string<std::basic_string<char, std::char_traits<char>, Allocator<char>>> {
+            static constexpr std::string_view default_name = "string";
+        };
+
+        template <>
+        struct std_basic_type_string<std::basic_string_view<char>> {
+            static constexpr std::string_view default_name = "string";
+        };
+        
+#undef  DEFINE_STD_TYPE_STRING_WITH_ALIASES
 
         //////////////////////////////
         // For string quote matching
@@ -187,7 +234,7 @@ namespace cpod {
                 }
             }
         }
-#define USELESS_SPACES_PREFIX_CHECK(c) ((c) != ';' && (c) != '{' && (c) != '}')
+#define USELESS_SPACES_PREFIX_CHECK(c) ((c) != ';' && (c) != '{' && (c) != '}' && (c) != ',' && (c) != '<' && (c) != '>')
         inline void remove_string_useless_spaces(std::string& str) { // Including \n and \t and so on.
             // Remove space characters at the end since *end() can't be empty.
             for (std::int8_t
@@ -255,22 +302,36 @@ namespace cpod {
             return bracket_count;
         }
 
+        inline auto check_quote_context(std::string_view rng) {
+            quote_counter_context qc;
+            for (const char& i : rng) {
+                if (qc.should_increase(&i)) {
+                    qc.increase();
+                }
+            }
+            return qc;
+        }
+
         ////////////////////////////////////
         /// Basic type reader and writer
         ///////////////////////////////////
         
-        template <basic_serializable_types Ty>
+        template <std_basic_type Ty>
         void text_basic_type_put(text_archive& a, std::string_view name, const Ty& v, std::uint32_t flag);
-        template <forward_sequential_container Cont>
+        template <std_forward_container Cont>
         void text_basic_type_fsc_put(text_archive& a, std::string_view name, const Cont& c, std::uint32_t flag);
-        template <basic_serializable_types Ty>
+        template <std_structure Sb>
+        void text_basic_structure_put(text_archive& a, std::string_view name, const Sb& v);
+        
+        template <std_basic_type Ty>
         void text_basic_type_get(text_archive& a, std::string_view name, Ty& v);
-        template <forward_sequential_container Cont>
+        template <std_forward_container Cont>
         void text_basic_type_fsc_get(text_archive& a, std::string_view name, Cont& c);
 
     }
 
-    // We only support normal character (char) as serializer type.
+    // Wide string is a mess and also we don't have convenient std::(to)from_wchars functionalaties
+    // So we don't support wchar_t as serialization type nor archive character type.
     
     class text_archive {
         std::string           content_;
@@ -301,11 +362,11 @@ namespace cpod {
         text_archive& put(std::string_view name, const Ty& a, uint32_t flag = 0) {
             using type = std::remove_cvref_t<Ty>;
             // Range type.
-            if constexpr (forward_sequential_container<type>) {
-                static_assert(basic_serializable_types<typename type::value_type>);
+            if constexpr (std_forward_container<type>) {
+                static_assert(std_basic_type<typename type::value_type>);
                 detail::text_basic_type_fsc_put(*this,name, a, flag);
             }
-            else if constexpr (basic_serializable_types<type>) {
+            else if constexpr (std_basic_type<type>) {
                 detail::text_basic_type_put(*this,name, a, flag);
             } else {
                 serializer<type>{}.text_put(*this, name, a, flag);
@@ -321,11 +382,11 @@ namespace cpod {
             // We assume this method handles buffer that already normalized.
             using type = std::remove_cvref_t<Ty>;
             // Range type.
-            if constexpr (forward_sequential_container<type>) {
-                static_assert(basic_serializable_types<typename type::value_type>);
+            if constexpr (std_forward_container<type>) {
+                static_assert(std_basic_type<typename type::value_type>);
                 detail::text_basic_type_fsc_get(*this,name, a);
             }
-            else if constexpr (basic_serializable_types<type>) {
+            else if constexpr (std_basic_type<type>) {
                 detail::text_basic_type_get(*this,name, a);
             } else {
                 serializer<type>{}.text_put(*this, name, a);
@@ -342,7 +403,7 @@ namespace cpod {
     namespace detail {
         
         //////////////////////////////////
-        ///     Output Formatter
+        ///     Output Formatter Base
         //////////////////////////////////
 
         template <class Sub, bool IsRange>
@@ -392,11 +453,18 @@ namespace cpod {
             }
         };
 
-        template <bool IsRange>
-        struct text_integer_output_formatter : text_output_formatter_base<text_integer_output_formatter<IsRange>, IsRange> {
-            using text_output_formatter_base<text_integer_output_formatter, IsRange>::type_string;
-            using text_output_formatter_base<text_integer_output_formatter, IsRange>::flag;
-            using text_output_formatter_base<text_integer_output_formatter, IsRange>::archive_ptr;
+        /////////////////////////////////////////////
+        /// Output Formater Implementation
+        ///////////////////////////////////////////// 
+        
+        template <typename Ty, bool IsRange>
+        struct text_output_formatter {};
+
+        template <std::integral Int, bool IsRange> requires !std::is_same_v<Int, bool>
+        struct text_output_formatter<Int, IsRange> : text_output_formatter_base<text_output_formatter<Int, IsRange>, IsRange> {
+            using text_output_formatter_base<text_output_formatter, IsRange>::type_string;
+            using text_output_formatter_base<text_output_formatter, IsRange>::flag;
+            using text_output_formatter_base<text_output_formatter, IsRange>::archive_ptr;
             
             std::string_view      neat_type_string;
             std::string_view      raw_type_string;
@@ -433,11 +501,11 @@ namespace cpod {
             }
         };
 
-        template <bool IsRange>
-        struct text_float_output_formatter : text_output_formatter_base<text_float_output_formatter<IsRange>, IsRange> {
-            using text_output_formatter_base<text_float_output_formatter, IsRange>::type_string;
-            using text_output_formatter_base<text_float_output_formatter, IsRange>::flag;
-            using text_output_formatter_base<text_float_output_formatter, IsRange>::archive_ptr;
+        template <std::floating_point Float, bool IsRange>
+        struct text_output_formatter<Float, IsRange> : text_output_formatter_base<text_output_formatter<Float, IsRange>, IsRange> {
+            using text_output_formatter_base<text_output_formatter, IsRange>::type_string;
+            using text_output_formatter_base<text_output_formatter, IsRange>::flag;
+            using text_output_formatter_base<text_output_formatter, IsRange>::archive_ptr;
             std::chars_format fmt = std::chars_format::general;
             
             void context_setup() {
@@ -457,10 +525,10 @@ namespace cpod {
         };
 
         template <bool IsRange>
-        struct text_bool_output_formatter : text_output_formatter_base<text_bool_output_formatter<IsRange>, IsRange> {
-            using text_output_formatter_base<text_bool_output_formatter, IsRange>::type_string;
-            using text_output_formatter_base<text_bool_output_formatter, IsRange>::flag;
-            using text_output_formatter_base<text_bool_output_formatter, IsRange>::archive_ptr;
+        struct text_output_formatter<bool, IsRange> : text_output_formatter_base<text_output_formatter<bool, IsRange>, IsRange> {
+            using text_output_formatter_base<text_output_formatter, IsRange>::type_string;
+            using text_output_formatter_base<text_output_formatter, IsRange>::flag;
+            using text_output_formatter_base<text_output_formatter, IsRange>::archive_ptr;
             void context_setup() {
                 type_string = "bool";
             }
@@ -470,18 +538,17 @@ namespace cpod {
         };
 
         // Raw string is not supported for now.
-        template <bool IsRange>
-        struct text_string_output_formatter : text_output_formatter_base<text_string_output_formatter<IsRange>, IsRange> {
-            using text_output_formatter_base<text_string_output_formatter, IsRange>::type_string;
-            using text_output_formatter_base<text_string_output_formatter, IsRange>::flag;
-            using text_output_formatter_base<text_string_output_formatter, IsRange>::archive_ptr;
+        template <class String, bool IsRange> requires std_string_type_traits<String>::value
+        struct text_output_formatter<String, IsRange> : text_output_formatter_base<text_output_formatter<String, IsRange>, IsRange> {
+            using text_output_formatter_base<text_output_formatter, IsRange>::type_string;
+            using text_output_formatter_base<text_output_formatter, IsRange>::flag;
+            using text_output_formatter_base<text_output_formatter, IsRange>::archive_ptr;
             void context_setup() {
                 type_string = "string";
             }
-            template <class Alloc>
-            void output_single_value(const std::basic_string<char, std::char_traits<char>, Alloc>& v) {
+            void output_single_value(std::string_view v) {
                 // Do string handling.
-                std::basic_string<char, std::char_traits<char>, Alloc> strbuf(v.size() + 2, '\0');
+                std::string strbuf(v.size() + 2, '\0');
                 std::copy_n(v.begin(), v.size(), strbuf.begin() + 1);
                 for (auto i = strbuf.begin(); i != strbuf.end(); ++i) {
                     switch (*i) {
@@ -504,8 +571,10 @@ namespace cpod {
             }
         };
 
+        
+
         ////////////////////////////////////
-        /// Input Formatter
+        /// Input Formatter Base
         ////////////////////////////////////
         
         template <class Sub, bool IsRange>
@@ -534,10 +603,16 @@ namespace cpod {
                         b != view::npos;
                         b = search_range.find(*i)) {
                         const int         count = detail::check_curly_bracket_matching(view(search_range.data(), b));
-                        const std::size_t off   = b + (*i).size() + 1;
+                              std::size_t off   = b + (*i).size() + 1;
                         // Means we have found one in the most outside region.
                         if (count == 0) {
-                            const std::size_t end = search_range.find(';', off);
+                            std::size_t beg = off;
+                            std::size_t end = search_range.find(';', beg);
+                            // If ; inside a string we should do further searching.
+                            for(;end != view::npos && !check_quote_context(view(search_range.data(), end)).is_quotes_matched();
+                                 end = search_range.find(';', beg)) {
+                                beg = end + 1;
+                            }
                             if (end == view::npos) {
                                 throw std::invalid_argument("Missing ; after a variable filed!");
                             }
@@ -562,7 +637,7 @@ namespace cpod {
                 }
             }
 
-            template <bool IsNotSet, std::forward_iterator FwdIt, forward_sequential_container Cont>
+            template <bool IsNotSet, std::forward_iterator FwdIt, std_forward_container Cont>
             void container_insert_value(std::string_view string_value, FwdIt& it, Cont& cont, std::size_t i) {
                 if constexpr (std::contiguous_iterator<FwdIt>) {
                     input_single_value(string_value, it[i]);
@@ -579,10 +654,10 @@ namespace cpod {
                 }
             }
             
-            template <std::forward_iterator FwdIt, forward_sequential_container Cont>
+            template <std::forward_iterator FwdIt, std_forward_container Cont>
             void input_values(std::string_view name, FwdIt it, Cont& cont) {
                 auto big_range = search_value_range(name);
-                constexpr std::string_view cont_name = forward_sequential_container_traits<Cont>::name;
+                constexpr std::string_view cont_name = std_forward_container_type_traits<Cont>::name;
                 constexpr bool container_is_not_set =
                     cont_name != "std::set" && cont_name != "std::multiset" &&
                     cont_name != "std::unordered_set" && cont_name != "std::unordered_multiset";
@@ -602,15 +677,22 @@ namespace cpod {
                 container_insert_value<container_is_not_set>(std::string_view(big_range.data(), bracket_len), it, cont, length - 1);
             }
 
-            template <basic_serializable_types Ty>
+            template <std_basic_type Ty>
             void input_values(std::string_view name, Ty& v) {
                 auto big_range = search_value_range(name);
                 input_single_value(big_range, v);
             }
         };
 
-        template <bool IsRange>
-        struct text_integer_input_formatter : text_input_formatter_base<text_integer_input_formatter<IsRange>, IsRange> {
+        /////////////////////////////////////////
+        /// Input Formatter Implementation
+        /////////////////////////////////////////
+
+        template <typename Ty, bool IsRange>
+        struct text_input_formatter {};
+
+        template <std::integral Int, bool IsRange> requires !std::is_same_v<Int, bool>
+        struct text_input_formatter<Int, IsRange> : text_input_formatter_base<text_input_formatter<Int, IsRange>, IsRange> {
             template <std::integral Ty>
             void input_single_value(std::string_view range, Ty& v) {
                 char         base = 10;
@@ -630,7 +712,7 @@ namespace cpod {
         };
 
         template <bool IsRange>
-        struct text_bool_input_formatter : text_input_formatter_base<text_bool_input_formatter<IsRange>, IsRange> {
+        struct text_input_formatter<bool, IsRange> : text_input_formatter_base<text_input_formatter<bool, IsRange>, IsRange> {
             void input_single_value(std::string_view range, bool& v) {
                 range = std::string_view(range.data(), range.size() - 1);
                 if (range == "true") { v = true; return ; }
@@ -639,8 +721,8 @@ namespace cpod {
             }
         };
         
-        template <bool IsRange>
-        struct text_string_input_formatter : text_input_formatter_base<text_string_input_formatter<IsRange>, IsRange> {
+        template <class String, bool IsRange> requires std_string_type_traits<String>::value
+        struct text_input_formatter<String, IsRange> : text_input_formatter_base<text_input_formatter<String, IsRange>, IsRange> {
             template <class Alloc>
             void input_single_value(std::string_view range, std::basic_string<char, std::char_traits<char>, Alloc>& v) {
                 // Ignore two quotes.
@@ -665,8 +747,8 @@ namespace cpod {
             }
         };
 
-        template <bool IsRange>
-        struct text_float_input_formatter : text_input_formatter_base<text_float_input_formatter<IsRange>, IsRange> {
+        template <std::floating_point Float, bool IsRange>
+        struct text_input_formatter<Float, IsRange> : text_input_formatter_base<text_input_formatter<Float, IsRange>, IsRange> {
             template <std::floating_point Ty>
             void input_single_value(std::string_view range, Ty& v) {
                 range = std::string_view(range.data(), range.size() - 1);
@@ -682,126 +764,72 @@ namespace cpod {
         /// Implementation of basic put and get
         ///////////////////////////////////////////
 
-        template <basic_serializable_types Ty>
+        template <std_basic_type Ty>
         void text_basic_type_put(text_archive& a, std::string_view name, const Ty& v, std::uint32_t flag) {
+            text_output_formatter<Ty, false> out;
+            out.archive_ptr       = &a;
+            out.flag              = flag;
             if constexpr (std::is_integral_v<Ty> && !std::is_same_v<Ty, bool>) {
-                text_integer_output_formatter<false> out;
-                out.raw_type_string   = std_integer_type_string<Ty>::raw;
-                out.neat_type_string  = std_integer_type_string<Ty>::neat;
-                out.archive_ptr       = &a;
-                out.flag              = flag;
-                out.output_values(name, &v); return;
+                out.raw_type_string   = std_basic_type_string<Ty>::raw;
+                out.neat_type_string  = std_basic_type_string<Ty>::neat;
             }
             if constexpr (std::is_floating_point_v<Ty>) {
-                text_float_output_formatter<false> out;
-                out.archive_ptr       = &a;
-                out.flag              = flag;
-                out.type_string       = std::is_same_v<Ty, float> ? "float" : "double";
-                out.output_values(name, &v); return;
+                out.type_string       = std_basic_type_string<Ty>::default_name;
             }
-            if constexpr (std_string_traits<Ty>::value) {
-                text_string_output_formatter<false> out;
-                out.archive_ptr       = &a;
-                out.flag              = flag;
-                out.output_values(name, &v); return;
-            }
-            if constexpr (std::is_same_v<Ty, bool>) {
-                text_bool_output_formatter<false> out;
-                out.archive_ptr       = &a;
-                out.output_values(name, &v); return;
-            }
+            out.output_values(name, &v);
         }
         
-        template <forward_sequential_container Cont>
+        template <std_forward_container Cont>
         void text_basic_type_fsc_put(text_archive& a, std::string_view name, const Cont& c, std::uint32_t flag) {
             using value_type = typename Cont::value_type;
+            text_output_formatter<value_type, true> out;
+            out.archive_ptr       = &a;
+            out.flag              = flag;
+            out.length            = c.size();
             if constexpr (std::is_integral_v<value_type> && !std::is_same_v<value_type, bool>) {
-                text_integer_output_formatter<true> out;
-                out.raw_type_string   = std_integer_type_string<value_type>::raw;
-                out.neat_type_string  = std_integer_type_string<value_type>::neat;
-                out.archive_ptr       = &a;
-                out.flag              = flag;
-                out.length            = c.size();
-                out.output_values(name, c.cbegin()); return;
+                out.raw_type_string   = std_basic_type_string<value_type>::raw;
+                out.neat_type_string  = std_basic_type_string<value_type>::neat;
             }
             if constexpr (std::is_floating_point_v<value_type>) {
-                text_float_output_formatter<true> out;
-                out.archive_ptr       = &a;
-                out.flag              = flag;
-                out.length            = c.size();
-                out.type_string       = std::is_same_v<value_type, float> ? "float" : "double";
-                out.output_values(name, c.cbegin()); return;
+                out.type_string       = std_basic_type_string<value_type>::default_name;
             }
-            if constexpr (std_string_traits<value_type>::value) {
-                text_string_output_formatter<true> out;
-                out.archive_ptr       = &a;
-                out.flag              = flag;
-                out.length            = c.size();
-                out.output_values(name, c.cbegin()); return;
-            }
-            if constexpr (std::is_same_v<value_type, bool>) {
-                text_bool_output_formatter<true> out;
-                out.archive_ptr       = &a;
-                out.length            = c.size();
-                out.output_values(name, c.cbegin()); return;
-            }
+            out.output_values(name, c.cbegin());
         }
 
-        template <basic_serializable_types Ty>
+        template <std_basic_type Ty>
         void text_basic_type_get(text_archive& a, std::string_view name, Ty& v) {
+            if constexpr (std_string_type_traits<Ty>::value) {
+                static_assert(!std_string_type_traits<Ty>::is_view, "Can't use string_view to accept data from archive!");
+            }
+            text_input_formatter<Ty, false> in;
+            in.search_range        = a.content();
             if constexpr (std::is_integral_v<Ty> && !std::is_same_v<Ty, bool>) {
-                text_integer_input_formatter<false> in;
-                in.type_string_aliases = std_integer_type_string<Ty>::aliases;
-                in.search_range        = a.content();
-                in.input_values(name, v);
+                in.type_string_aliases = std_basic_type_string<Ty>::aliases;
+            } else {
+                in.type_string_aliases = std_basic_type_string<Ty>::default_name;
             }
-            if constexpr (std::is_floating_point_v<Ty>) {
-                text_float_input_formatter<false> in;
-                in.type_string_aliases = std::is_same_v<Ty, float> ? "float" : "double";
-                in.search_range        = a.content();
-                in.input_values(name, v);
-            }
-            if constexpr (std_string_traits<Ty>::value) {
-                text_string_input_formatter<false> in;
-                in.type_string_aliases = "string";
-                in.search_range        = a.content();
-                in.input_values(name, v);
-            }
-            if constexpr (std::is_same_v<Ty, bool>) {
-                text_bool_input_formatter<false> in;
-                in.type_string_aliases = "bool";
-                in.search_range        = a.content();
-                in.input_values(name, v);
-            }
+            in.input_values(name, v);
         }
 
-        template <forward_sequential_container Cont>
+        template <std_forward_container Cont>
         void text_basic_type_fsc_get(text_archive& a, std::string_view name, Cont& c) {
             using value_type = typename Cont::value_type;
+            if constexpr (std_string_type_traits<value_type>::value) {
+                static_assert(!std_string_type_traits<value_type>::is_view, "Can't use string_view to accept data from archive!");
+            }
+            text_input_formatter<value_type, true> in;
+            in.search_range        = a.content();
             if constexpr (std::is_integral_v<value_type> && !std::is_same_v<value_type, bool>) {
-                text_integer_input_formatter<true> in;
-                in.type_string_aliases = std_integer_type_string<value_type>::aliases;
-                in.search_range        = a.content();
-                in.input_values(name, c.begin(), c);
+                in.type_string_aliases = std_basic_type_string<value_type>::aliases;
+            } else {
+                in.type_string_aliases = std_basic_type_string<value_type>::default_name;
             }
-            if constexpr (std::is_floating_point_v<value_type>) {
-                text_float_input_formatter<true> in;
-                in.type_string_aliases = std::is_same_v<value_type, float> ? "float" : "double";
-                in.search_range        = a.content();
-                in.input_values(name, c.begin(), c);
-            }
-            if constexpr (std_string_traits<value_type>::value) {
-                text_string_input_formatter<true> in;
-                in.type_string_aliases = "string";
-                in.search_range        = a.content();
-                in.input_values(name, c.begin(), c);
-            }
-            if constexpr (std::is_same_v<value_type, bool>) {
-                text_bool_input_formatter<true> in;
-                in.type_string_aliases = "bool";
-                in.search_range        = a.content();
-                in.input_values(name, c.begin(), c);
-            }
+            in.input_values(name, c.begin(), c);
+        }
+
+        template <std_structure Sb>
+        void text_basic_structure_put(text_archive& a, std::string_view name, const Sb& v) {
+            
         }
     }
 }
