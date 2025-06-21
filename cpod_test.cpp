@@ -1,60 +1,14 @@
-#include "cpod.hpp"
 #include <iostream>
-#include <array>
-#include <fstream>
-#include <sstream>
-#include <format>
-#include <memory_resource>
+#include "cpod.hpp"
 
-int main(int argc, char* argv[]) {
+int main() {
+    using namespace std::string_view_literals;
+    using namespace std::string_literals;
 
-    std::ifstream ifs("TestFile.cpod.cpp");
-    std::stringstream iss;
+    std::unordered_map<int, std::tuple<float, float>> map = { {1, std::make_tuple(1.F, 2.F)}, {3, std::make_tuple(1.F, 2.F)} };
     
-    // Remove macro defines.
-    for (std::string line; std::getline(ifs, line);) {
-        if (line[0] != '#' && line != "using namespace std;") {
-            iss  << line << "\n";
-        } 
-    }
-    
-    cpod::text_archive ti(iss.str());
-    ti.normalize();
+    cpod::archive arch;
+    arch << cpod::var("AMap", map);
 
-    std::cout << ti.content() << std::endl;
-    
-    // Next we will load data from archive to these variables.
-    // Variable types must be same
-    std::string                  myName;          
-    int                          myAge;           
-    bool                         amIaBoy;         
-    float                        myHeight;        
-    float                        myWidth;
-    std::set<std::string>        myEmails;
-    std::string                  shaderCode;
-    
-    ti
-    .get("myName", myName)
-    .get("myAge", myAge)
-    .get("amIaBoy", amIaBoy)
-    .get("myHeight", myHeight)
-    .get("myWidth", myWidth)
-    .get("myEmails", myEmails)
-    .get("shaderCode", shaderCode);
-    
-    std::cout << "Personal info: \n" << std::boolalpha
-              << "Name:        " << myName   << '\n'
-              << "Age:         " << myAge    << '\n'
-              << "Height:      " << myHeight << '\n'
-              << "Width:       " << myWidth  << '\n'
-              << "Am I a boy:  " << amIaBoy  << '\n'
-              << "Emails: " << '\n';
-    for (auto& i : myEmails) { std::cout << '\t' << i << '\n'; }
-
-    std::cout << "----------This is a vertex shader-------------\n";
-    std::cout << shaderCode << std::endl;
-
-    // cpod::text_archive archive;
-    // archive.put("HiThere", std::unordered_set<float>{1.15F, 2.26F});
-    // std::cout << archive.content() << std::endl;
+    std::cout << arch.content() << std::endl;
 }
