@@ -73,22 +73,26 @@ namespace cpod {
     struct serializer {};
     
     typedef struct {
-        std::string::iterator  it;
-        std::errc              ec;
+        std::string            code;
+        std::string            errmsg;
     } compile_result;
+
+    
 
     // Compiler declaration namespace.
     namespace detail {
 
         // Remove comments and useless spaces and
-        std::string remove_useless_data(std::string_view src);
+        std::string    remove_useless_data(std::string_view src);
         // Replace '\n' '\t' to there actual memory form and convert all string to 'R' string.
-        std::string normalize_string(std::string_view src);
+        std::string    normalize_string(std::string_view src);
         // Lexer that split tokens apart.
-        std::string tokenizer_split_source(std::string_view src);
+        std::string    tokenizer_split_source(std::string_view src);
         // Generate final result.
-        std::string generate_byte_stream  (std::string_view src);
-        
+        std::string    generate_byte_stream  (std::string_view src);
+
+        // Generate binary code that can be loaded by the program.
+        compile_result generate_binary_code(std::string_view src);
     }
 
     class archive {
@@ -129,42 +133,37 @@ namespace cpod {
     };
 
     namespace detail {
-        template <class Ty>
-struct std_basic_type_string {};
 
-#define DEFINE_STD_TYPE_STRING_WITH_ALIASES(type, r, n)                     \
-template <> struct std_basic_type_string<type> {                        \
-static constexpr std::string_view raw                  = r;         \
-static constexpr std::string_view neat                 = n;         \
-static constexpr std::string_view aliases              = r##";"##n; \
-static constexpr std::string_view default_name         = raw;       \
+        template <class Ty>
+        struct std_basic_type_traits : std::false_type {};
+
+#define DEFINE_STD_BASIC_TYPE_STRING(type, id)                                 \
+template <>                                                                    \
+struct std_basic_type_traits<std::remove_cvref_t<##type##>> : std::true_type { \
+    static constexpr std::string_view name = #type ;                           \
+    static constexpr std::uint8_t     identifier = id;                         \
 }
     
-        DEFINE_STD_TYPE_STRING_WITH_ALIASES(int8_t  , "int8_t"  , "char");
-        DEFINE_STD_TYPE_STRING_WITH_ALIASES(uint8_t , "uint8_t" , "unsigned char");
-        DEFINE_STD_TYPE_STRING_WITH_ALIASES(int16_t , "int16_t" , "short");
-        DEFINE_STD_TYPE_STRING_WITH_ALIASES(uint16_t, "uint16_t", "unsigned short");
-        DEFINE_STD_TYPE_STRING_WITH_ALIASES(int     , "int"     , "int32_t");
-        DEFINE_STD_TYPE_STRING_WITH_ALIASES(uint32_t, "uint32_t", "unsigned int");
-        DEFINE_STD_TYPE_STRING_WITH_ALIASES(int64_t , "int64_t" , "long long");
-        DEFINE_STD_TYPE_STRING_WITH_ALIASES(uint64_t, "uint64_t", "unsigned long long");
-        // Future floating point may have these aliases but not now.
-        DEFINE_STD_TYPE_STRING_WITH_ALIASES(float   , "float"   , "float32_t");
-        DEFINE_STD_TYPE_STRING_WITH_ALIASES(double  , "double"  , "float64_t");
+        DEFINE_STD_BASIC_TYPE_STRING(int8_t,        1);
+        DEFINE_STD_BASIC_TYPE_STRING(uint8_t,       2);
+        DEFINE_STD_BASIC_TYPE_STRING(int16_t,       3);
+        DEFINE_STD_BASIC_TYPE_STRING(uint16_t,      4);
+        DEFINE_STD_BASIC_TYPE_STRING(int,           5);
+        DEFINE_STD_BASIC_TYPE_STRING(uint32_t,      6);
+        DEFINE_STD_BASIC_TYPE_STRING(int64_t,       7);
+        DEFINE_STD_BASIC_TYPE_STRING(uint64_t,      8);
+        DEFINE_STD_BASIC_TYPE_STRING(float,         9);
+        DEFINE_STD_BASIC_TYPE_STRING(double,        10);
+        DEFINE_STD_BASIC_TYPE_STRING(bool,          11);
+        DEFINE_STD_BASIC_TYPE_STRING(std::string,   12);
 
+        // String and string_view uses same type name.
         template <>
-        struct std_basic_type_string<bool> {
-            static constexpr std::string_view default_name = "bool";
+        struct std_basic_type_traits<std::basic_string_view<char>> : std::true_type {
+            static constexpr std::string_view name        = "std::string";
+            static constexpr std::uint8_t     identifier  = 12;
         };
-        template <template <class> class Allocator>
-        struct std_basic_type_string<std::basic_string<char, std::char_traits<char>, Allocator<char>>> {
-            static constexpr std::string_view default_name = "string";
-        };
-        template <>
-        struct std_basic_type_string<std::basic_string_view<char>> {
-            static constexpr std::string_view default_name = "string";
-        };
-#undef  DEFINE_STD_TYPE_STRING_WITH_ALIASES
+#undef  DEFINE_STD_BASIC_TYPE_STRING
 
         // Concepts and constraints.
         template <class Ty>
@@ -180,572 +179,331 @@ static constexpr std::string_view default_name         = raw;       \
             static constexpr bool is_view = true;
         };
 
-        template <typename T>
-        struct std_pair_type_traits : std::false_type {};
-
-        template <typename T1, typename T2>
-        struct std_pair_type_traits<std::pair<T1, T2>> : std::true_type {};
-
-        template <typename T>
-        struct std_tuple_type_traits : std::false_type {};
-
-        template <typename... Args>
-        struct std_tuple_type_traits<std::tuple<Args...>> : std::true_type {};
-
+        // Container type traits.
         template <class Ty>
-        struct std_structured_binding_type_traits : std::false_type {};
+        struct std_template_library_type_traits : std::false_type {};
+        
+#define DEFINE_MONO_STL_TRAITS(type, id, resizable) \
+    template <typename Ty, typename ... OtherStuff> \
+    struct std_template_library_type_traits<type##<Ty, OtherStuff...>> : std::true_type { \
+        static constexpr bool             is_resizeable      = resizable;\
+        static constexpr bool             is_mono            = true;     \
+        static constexpr bool             is_double          = false;    \
+        static constexpr std::string_view name               = #type;    \
+        static constexpr std::uint8_t     identifier         = id;       \
+    }
+#define DEFINE_DOUBLE_STL_TRAITS(type, id) \
+template <typename K, typename V, typename ... OtherStuff> \
+    struct std_template_library_type_traits<type##<K, V, OtherStuff...>> : std::true_type { \
+        static constexpr bool             is_resizeable      = false;    \
+        static constexpr bool             is_mono            = false;    \
+        static constexpr bool             is_double          = true;     \
+        static constexpr std::string_view name               = #type;    \
+        static constexpr std::uint8_t     identifier         = id;       \
+    }
+        
+        DEFINE_MONO_STL_TRAITS(std::vector,               13, true);
+        DEFINE_MONO_STL_TRAITS(std::deque,                14, true);
+        DEFINE_MONO_STL_TRAITS(std::list,                 15, true);
+        DEFINE_MONO_STL_TRAITS(std::forward_list,         16, true);
+        DEFINE_MONO_STL_TRAITS(std::set,                  17, false);
+        DEFINE_MONO_STL_TRAITS(std::multiset,             18, false);
+        DEFINE_MONO_STL_TRAITS(std::unordered_set,        19, false);
+        DEFINE_MONO_STL_TRAITS(std::unordered_multiset,   20, false);
+
+        DEFINE_DOUBLE_STL_TRAITS(std::map,                21);
+        DEFINE_DOUBLE_STL_TRAITS(std::multimap,           22);
+        DEFINE_DOUBLE_STL_TRAITS(std::unordered_map,      23);
+        DEFINE_DOUBLE_STL_TRAITS(std::unordered_multimap, 24);
 
         template <typename K, typename V>
-        struct std_structured_binding_type_traits<std::pair<K, V>> : std::true_type {
+        struct std_template_library_type_traits<std::pair<K, V>> : std::true_type {
+            static constexpr bool             is_resizeable      = false;
+            static constexpr bool             is_mono            = false;
+            static constexpr bool             is_double          = false; 
+            static constexpr std::string_view name               = "std::pair";
+            static constexpr std::uint8_t     identifier         = 25;
         };
 
-        template <typename ... Types>
-        struct std_structured_binding_type_traits<std::tuple<Types...>> : std::true_type {
+        template <typename Ty, std::size_t N>
+        struct std_template_library_type_traits<std::array<Ty, N>> : std::true_type {
+            static constexpr bool             is_resizeable      = false;
+            static constexpr bool             is_mono            = false;
+            static constexpr bool             is_double          = false; 
+            static constexpr std::string_view name               = "std::array";
+            static constexpr std::uint8_t     identifier         = 26;
+            
         };
+
+        template <typename ... Args>
+        struct std_template_library_type_traits<std::tuple<Args...>> : std::true_type {
+            static constexpr bool             is_resizeable      = false;
+            static constexpr bool             is_mono            = false;
+            static constexpr bool             is_double          = false; 
+            static constexpr std::string_view name               = "std::tuple";
+            static constexpr std::uint8_t     identifier         = 27;
+        };
+#undef DEFINE_DOUBLE_STL_TRAITS
+#undef DEFINE_MONO_STL_TRAITS
 
         template <class Ty>
-        struct std_forward_container_type_traits : std::false_type {};
+        concept std_basic_type             = std_basic_type_traits<Ty>::value;
 
-        // Two static container
-        template <class Ty, std::size_t N>
-        struct std_forward_container_type_traits<std::array<Ty, N>> : std::true_type {
-            static constexpr bool is_map                = false;
-            static constexpr bool is_set                = false;
-            static constexpr bool is_static_sized       = true;
-        };
+        template <class Ty>
+        concept std_template_library_range = std_template_library_type_traits<Ty>::is_mono || std_template_library_type_traits<Ty>::is_double;
 
-        template <class Ty, std::size_t N>
-        struct std_forward_container_type_traits<std::span<Ty, N>>  : std::true_type {
-            static constexpr bool is_map                = false;
-            static constexpr bool is_set                = false;
-            static constexpr bool is_static_sized       = true;
-        };
-
-        // Contains to flat and get type string.
-        template <typename Ty>
-        struct to_flat_structure_stuff_impl {};
-
-        template <typename Value> requires !std_structured_binding_type_traits<Value>::value
-        struct to_flat_structure_stuff_impl<Value> {
-            constexpr auto operator()(const Value& value) const {
-                return std::tuple<Value>(value);
-            }
-            constexpr auto operator()(std::string& buf) const {
-                buf.append(std_basic_type_string<std::remove_const_t<Value>>::default_name);
-                buf.push_back(',');
-            }
-            template <class Fmt>
-            constexpr auto operator()(const Value& value, std::string& buf, Fmt formatter) {
-                std::invoke(formatter, value);
-                buf.push_back(',');
-            }
-        };
+        template <class Ty>
+        struct iterate_std_template_stuff_impl {};
 
         template <class ... Args>
-        struct get_tree_structure_string_helper {};
+        struct iterate_std_template_recursive_helper {};
 
         template <class Last>
-        struct get_tree_structure_string_helper<Last> {
-            constexpr auto operator()(std::string& buf) const {
-                to_flat_structure_stuff_impl<Last>{}(buf);
+        struct iterate_std_template_recursive_helper<Last> {
+            constexpr auto operator()(std::string& buf, bool bin) const {
+                iterate_std_template_stuff_impl<Last>{}(buf, bin);
             }
         };
         
         template <class First, typename ... Rest>
-        struct get_tree_structure_string_helper<First, Rest...> {
-            constexpr auto operator()(std::string& buf) const {
-                to_flat_structure_stuff_impl<First>{}(buf);
-                get_tree_structure_string_helper<Rest...>{}(buf);
+        struct iterate_std_template_recursive_helper<First, Rest...> {
+            constexpr auto operator()(std::string& buf, bool bin) const {
+                iterate_std_template_stuff_impl<First>{}(buf, bin);
+                iterate_std_template_recursive_helper<Rest...>{}(buf, bin);
+            }
+        };
+        
+        template <std_basic_type Value>
+        struct iterate_std_template_stuff_impl<Value> {
+            constexpr auto operator()(std::string& buf, bool bin) const {
+                if (!bin) {
+                    buf.append(std_basic_type_traits<std::remove_const_t<Value>>::name);
+                } else {
+                    buf.push_back(std_basic_type_traits<std::remove_const_t<Value>>::identifier);
+                }
+                buf.push_back(',');
+            }
+            template <class Formatter>
+            constexpr auto operator()(std::string& buf, Formatter formatter, const Value& value) {
+                std::invoke(formatter, buf, value);
+                buf.push_back(',');
             }
         };
 
-        template <typename K, typename V>
-        struct to_flat_structure_stuff_impl<std::pair<K, V>> {
-            constexpr auto operator()(const std::pair<K, V>& p) const {
-                return std::tuple_cat(to_flat_structure_stuff_impl<K>{}(p.first), to_flat_structure_stuff_impl<V>{}(p.second));
-            }
-            constexpr auto operator()(std::string& buf) const {
-                buf.append("pair<");
-                get_tree_structure_string_helper<K, V>{}(buf);
+        template <std_template_library_range STL>
+        struct iterate_std_template_stuff_impl<STL> {
+            constexpr auto operator()(std::string& buf, bool bin) const {
+                if (!bin) {
+                    buf.append(std_template_library_type_traits<STL>::name).push_back('<');   
+                } else {
+                    buf.push_back(std_template_library_type_traits<STL>::identifier);
+                    buf.push_back('<');
+                }
+                if constexpr (std_template_library_type_traits<STL>::is_mono) {
+                    iterate_std_template_recursive_helper<typename STL::value_type>{}(buf, bin);
+                }
+                else if constexpr (std_template_library_type_traits<STL>::is_double) {
+                    iterate_std_template_recursive_helper<typename STL::key_type, typename STL::value_type::second_type>{}(buf, bin);
+                }
                 buf.back() = '>';
                 buf.push_back(',');
             }
-            template <class Fmt>
-            constexpr auto operator()(const std::pair<K, V>& p, std::string& buf, Fmt formatter) {
+            template <class Formatter>
+            constexpr auto operator()(std::string& buf, Formatter formatter, const STL& value) {
                 buf.push_back('{');
-                to_flat_structure_stuff_impl<K>{}(p.first, buf, formatter);
-                to_flat_structure_stuff_impl<V>{}(p.second, buf, formatter);
+                for (auto i = value.cbegin(); i != value.cend(); ++i) {
+                    iterate_std_template_stuff_impl<typename STL::value_type>{}(buf, formatter, *i);
+                }
+                buf.back() = '}';
+                buf.push_back(',');
+            }
+        };
+
+        template <typename F, typename S>
+        struct iterate_std_template_stuff_impl<std::pair<F, S>> {
+            constexpr auto operator()(std::string& buf, bool bin) const {
+                if (!bin) {
+                    buf.append("std::pair<");
+                } else {
+                    buf.push_back('\x19');
+                    buf.push_back('<');
+                }
+                iterate_std_template_recursive_helper<F, S>{}(buf, bin);
+                buf.back() = '>';
+                buf.push_back(',');
+            }
+            template <class Formatter>
+            constexpr auto operator()(std::string& buf, Formatter formatter, const std::pair<F, S>& value) {
+                buf.push_back('{');
+                iterate_std_template_stuff_impl<std::remove_cvref_t<F>>{}(buf, formatter, value.first);
+                iterate_std_template_stuff_impl<std::remove_cvref_t<S>>{}(buf, formatter, value.second);
                 buf.back() = '}';
                 buf.push_back(',');
             }
         };
         
-        template <typename ... Args>
-        struct to_flat_structure_stuff_impl<std::tuple<Args...>> {
-            template <std::size_t Index = 0, class Fmt>
-            constexpr auto write_tuple_impl(const std::tuple<Args...>& t, std::string& buf, Fmt formatter) {
-                if constexpr (Index != std::tuple_size_v<std::tuple<Args...>>) {
-                    to_flat_structure_stuff_impl<std::tuple_element_t<Index, std::tuple<Args...>>>{}(std::get<Index>(t), buf, formatter);
-                    write_tuple_impl<Index + 1, Fmt>(t, buf, formatter);
+        template <typename Ty, std::size_t N>
+        struct iterate_std_template_stuff_impl<std::array<Ty, N>> {
+            template <std::size_t Index = 0, class Formatter>
+            constexpr void write_array(std::string& buf, Formatter formatter, const std::array<Ty, N>& value) {
+                if constexpr (Index < N) {
+                    iterate_std_template_stuff_impl<Ty>{}(buf, formatter, std::get<Index>(value));
+                    write_array<Index + 1, Formatter>(buf, formatter, value);
+                }
+            } 
+            constexpr auto operator()(std::string& buf, bool bin) const {
+                if (!bin) {
+                    buf.append("std::array<");
                 } else {
-                    buf.back() = '}';
-                    buf.push_back(',');
+                    buf.push_back('\x1a');
+                    buf.push_back('<');
+                }
+                iterate_std_template_stuff_impl<Ty>{}(buf, bin);
+                buf.append(std::to_string(N)).push_back('>');
+                buf.push_back(',');
+            }
+            template <class Formatter>
+            constexpr auto operator()(std::string& buf, Formatter formatter, const std::array<Ty, N>& value) {
+                buf.push_back('{');
+                write_array(buf, formatter, value);
+                buf.back() = '}';
+                buf.push_back(',');
+            }
+        };
+
+        template <class ... Args>
+        struct iterate_std_template_stuff_impl<std::tuple<Args...>> {
+            template <std::size_t Index = 0, class Formatter>
+            constexpr void write_tuple(std::string& buf, Formatter formatter, const std::tuple<Args...>& value) {
+                if constexpr (Index < sizeof ... (Args)) {
+                    iterate_std_template_stuff_impl<std::tuple_element_t<Index, std::tuple<Args...>>>{}(buf, formatter, std::get<Index>(value));
+                    write_tuple<Index + 1, Formatter>(buf, formatter, value);
                 }
             }
-            constexpr auto operator()(const std::tuple<Args...>& t) const {
-                return std::apply([]<typename... T0>(const T0&... args) {
-                    return std::tuple_cat(to_flat_structure_stuff_impl<T0>{}(args)...);
-                }, t);
-            }
-            constexpr auto operator()(std::string& buf) const {
-                buf.append("tuple<");
-                get_tree_structure_string_helper<Args...>{}(buf);
+            constexpr auto operator()(std::string& buf, bool bin) const {
+                if (!bin) {
+                    buf.append("std::tuple<");
+                } else {
+                    buf.push_back('\x1b');
+                }
+                iterate_std_template_recursive_helper<Args...>{}(buf, bin);
                 buf.back() = '>';
                 buf.push_back(',');
             }
-            template <class Fmt>
-            constexpr auto operator()(const std::tuple<Args...>& t, std::string& buf, Fmt formatter) {
+            template <class Formatter>
+            constexpr auto operator()(std::string& buf, Formatter formatter, const std::tuple<Args...>& value) {
                 buf.push_back('{');
-                write_tuple_impl(t, buf, formatter);
+                write_tuple(buf, formatter, value);
+                buf.back() = '}';
+                buf.push_back(',');
             }
         };
-        
-        template <typename Ty>
-        auto to_flat_structure(const Ty& value) {
-            return to_flat_structure_stuff_impl<Ty>{}(value);
-        }
-
-        template <typename Ty, class Fmt>
-        auto get_tree_structure_value_string(const Ty& v, std::string& buf, Fmt f) {
-            to_flat_structure_stuff_impl<Ty>{}(v, buf, f);
-            buf.pop_back(); // remove last ,
-        }
-
-        template <typename Ty>
-        auto get_tree_structure_type_string() {
-            std::string buf;
-            to_flat_structure_stuff_impl<Ty>{}(buf);
-            buf.pop_back(); // remove last ,
-            return buf;
-        }
-
-        template <std::size_t Index, typename Ty>
-        struct to_tree_structure_impl {};
-
-        template <std::size_t Index, typename Ty> requires !std_structured_binding_type_traits<Ty>::value
-        struct to_tree_structure_impl<Index, Ty> {
-            template <class Tuple>
-            constexpr void operator()(Ty& v, const Tuple& tup) const {
-                v = std::get<Index>(tup);
-            }
-            static constexpr std::size_t next_index = Index + 1;
-        };
-
-        template <std::size_t Index, typename K, typename V> 
-        struct to_tree_structure_impl<Index, std::pair<K, V>> {
-            using first_unflatten_t  = to_tree_structure_impl<Index, K>;
-            using second_unflatten_t = to_tree_structure_impl<first_unflatten_t::next_index, V>;
-            template <class Tuple>
-            constexpr void operator()(std::pair<K, V>& p, const Tuple& tup) const {
-                first_unflatten_t{}(p.first, tup);
-                second_unflatten_t{}(p.second, tup);
-            }
-            static constexpr std::size_t next_index = second_unflatten_t::next_index;
-        };
-
-        // Helper template to calculate next index.
-        template <std::size_t StartIndex, typename... Args>
-        struct tuple_index_accumulator;
-
-        // End when no more elements.
-        template <std::size_t StartIndex>
-        struct tuple_index_accumulator<StartIndex> {
-            static constexpr std::size_t value = StartIndex;
-        };
-
-        // Handle each element.
-        template <std::size_t StartIndex, typename First, typename... Rest>
-        struct tuple_index_accumulator<StartIndex, First, Rest...> {
-            static constexpr std::size_t after_first = 
-                to_tree_structure_impl<StartIndex, First>::next_index;
-            
-            static constexpr std::size_t value = 
-                tuple_index_accumulator<after_first, Rest...>::value;
-        };
-
-        template <std::size_t StartIndex, typename... Args>
-        struct to_tree_structure_tuple_helper_impl;
-
-        template <std::size_t StartIndex>
-        struct to_tree_structure_tuple_helper_impl<StartIndex> {
-            template <class Tuple, class FlatTuple>
-            constexpr void operator()(Tuple&, const FlatTuple&) const {}
-            static constexpr std::size_t next_index = StartIndex;
-        };
-
-        template <std::size_t StartIndex, typename First, typename... Rest>
-        struct to_tree_structure_tuple_helper_impl<StartIndex, First, Rest...> {
-            using first_unflatten_t = to_tree_structure_impl<StartIndex, First>;
-            using rest_unflatten_t = to_tree_structure_tuple_helper_impl<first_unflatten_t::next_index, Rest...>;
-            
-            template <class Tuple, class FlatTuple>
-            constexpr void operator()(Tuple& t, const FlatTuple& flat_tup) const {
-                // Handle first element.
-                first_unflatten_t{}(std::get<0>(t), flat_tup);
-                // Handle the rest.
-                if constexpr (sizeof...(Rest) > 0) {
-                    std::apply([&](auto&&, auto&&... args) {
-                        auto rest_tuple = std::tie(args...);
-                        rest_unflatten_t{}(rest_tuple, flat_tup);
-                    }, t);
-                }
-            }
-            static constexpr std::size_t next_index = rest_unflatten_t::next_index;
-        };
-
-        template <std::size_t Index, typename... Args>
-        struct to_tree_structure_impl<Index, std::tuple<Args...>> {
-            using impl_t = to_tree_structure_tuple_helper_impl<Index, Args...>;
-            
-            template <class Tuple>
-            constexpr void operator()(std::tuple<Args...>& t, const Tuple& tup) const {
-                impl_t{}(t, tup);
-            }
-            
-            // Calculate next index with helper template.
-            static constexpr std::size_t next_index = 
-                tuple_index_accumulator<Index, Args...>::value;
-        };
-
-        // The inverse of to_flat_structure
-        template <std::size_t Index = 0, class Ty, class Tuple>
-        void to_tree_structure(Ty& unflattend, const Tuple& flattend) {
-            to_tree_structure_impl<Index, Ty>{}(unflattend, flattend);
-        }
-            
-        // We don't have container adaptors supported i.e. stack and queue and future flat_map flat_set.
-#define SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(container, iss) \
-template <class Ty, template <class> class Allocator> \
-struct std_forward_container_type_traits<container##<Ty, Allocator<Ty>>> : std::true_type { \
-static constexpr bool is_map                = false; \
-static constexpr bool is_set                = iss;   \
-static constexpr bool is_static_sized       = false; \
-}
-#define SPECIALIZE_DYNAMIC_STD_MAP_TYPE_TRAITS(container) \
-template <class ... Args> \
-struct std_forward_container_type_traits<container##<Args...>> : std::true_type { \
-static constexpr bool is_map  = true;                   \
-static constexpr bool is_set  = false;                  \
-static constexpr bool is_static_sized       = false;    \
-}
-
-        SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::vector, false);
-        SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::deque, false);
-        SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::list, false);
-        SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::forward_list, false);
-        SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::set, true);
-        SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::multiset, true);
-        SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::unordered_set, true);
-        SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS(std::unordered_multiset, true);
-    
-        SPECIALIZE_DYNAMIC_STD_MAP_TYPE_TRAITS(std::map);
-        SPECIALIZE_DYNAMIC_STD_MAP_TYPE_TRAITS(std::multimap);
-        SPECIALIZE_DYNAMIC_STD_MAP_TYPE_TRAITS(std::unordered_map);
-        SPECIALIZE_DYNAMIC_STD_MAP_TYPE_TRAITS(std::unordered_multimap);
-
-#undef SPECIALIZE_DYNAMIC_STD_FORWARD_CONTAINER_TYPE_TRAITS
-#undef SPECIALIZE_DYNAMIC_STD_MAP_TYPE_TRAITS
         
     }
 
-    template <typename Ty>
-    concept std_basic_type =
-        std::is_same_v<Ty, char>      || std::is_same_v<Ty, unsigned char>      ||
-        std::is_same_v<Ty, short>     || std::is_same_v<Ty, unsigned short>     ||
-        std::is_same_v<Ty, int>       || std::is_same_v<Ty, unsigned int>       ||
-        std::is_same_v<Ty, long long> || std::is_same_v<Ty, unsigned long long> ||
-        std::is_same_v<Ty, float>     || std::is_same_v<Ty, double>             ||
-        std::is_same_v<Ty, bool>      || detail::std_string_type_traits<Ty>::value;
-
-    template <typename Ty>
-    concept std_basic_structure = detail::std_structured_binding_type_traits<Ty>::value;
-    
     template <class Ty>
-    concept std_forward_container = detail::std_forward_container_type_traits<Ty>::value;
-
-    typedef enum std_integer_output_flags {
-        integer_neat_type     = 1 << 0, // Use (u)intX_t
-        integer_form_binary   = 1 << 1,
-        integer_form_heximal  = 1 << 2,
-        integer_case_upper    = 1 << 3, // Default is lower case.
-    } std_integer_output_flags;
-
-    typedef enum std_floating_point_output_flags {
-        floating_point_fixed             = 1 << 0, // Clip if out of range and fill 0 if not enough.
-        floating_point_scientific        = 1 << 1,
-        floating_point_char_upper        = 1 << 3
-    } std_floating_point_output_flags;
+    concept std_type = detail::std_template_library_type_traits<Ty>::value || detail::std_basic_type<Ty>;
     
-    ////////////////////////////////////
-    ///    Detail implementation
-    ////////////////////////////////////    
-    namespace detail {
+    // Further type string all use this.
+    template <typename Ty>
+    constexpr auto std_type_name_string(bool bin = false) noexcept {
+        std::string buffer;
+        detail::iterate_std_template_stuff_impl<Ty>{}(buffer, bin);
+        if (!bin) {
+            buffer.pop_back(); // Remove last ,
+        }
+        else {
+            buffer.back() = '\0';
+        }
+        return buffer;
+    }
 
-        //////////////////////////////////
-        ///     Output Formatter Base
-        //////////////////////////////////
+    template <typename Ty, class Formatter>
+    constexpr auto std_type_value_string(const Ty& value, Formatter formatter) {
+        std::string buffer;
+        detail::iterate_std_template_stuff_impl<Ty>{}(buffer, formatter, value);
+        buffer.back() = ';';
+        return buffer;
+    }
 
-        template <class Sub, bool IsRange>
-        struct text_output_formatter_base {
-            std::string      type_string;
-            std::size_t      length = 0;
-            flag_t           flag   = 0;
-            archive*         archive_ptr;
+    typedef enum std_basic_type_format_flag{
+        integer_binary            = 1 << 1,
+        integer_heximal           = 1 << 2,
+        floating_point_fixed      = 1 << 3,
+        floating_point_scientific = 1 << 4,
+        string_use_raw            = 1 << 5,
+    } std_basic_type_format_flag;
 
-            // Can be unrequired, but I just want to add this since most output formatter contains this.
-            void context_setup() {
-                static_cast<Sub*>(this)->context_setup();
-            }
-            
-            template <typename Ty>
-            void output_single_value(const Ty& v) {
-                static_cast<Sub*>(this)->output_single_value(v);
-            }
-
-            template <std::forward_iterator FwdIt>
-            void output_values(std::string_view name, FwdIt it) {
-                context_setup();
-                archive_ptr->content().append(type_string).push_back(' ');
-                archive_ptr->content().append(name);
-                if constexpr (!IsRange) {
-                    archive_ptr->content().push_back('=');
-                    output_single_value(*it);                
-                    archive_ptr->content().push_back(';');
-                } else {
-                    char  length_str[32] = "\0"; *length_str = '[';
-                    char* length_end = std::to_chars(length_str + 1, length_str + 32, length).ptr;
-                    *length_end = ']'; ++length_end;
-                    *length_end = '='; ++length_end;
-                    *length_end = '{'; ++length_end;
-                    archive_ptr->content().append(length_str); 
-                    for (std::size_t i = 0; i != length; ++i) {
-                        if constexpr (std::contiguous_iterator<FwdIt>) {
-                            output_single_value(it[i]);
-                        } else {
-                            output_single_value(*it++);
+    struct std_basic_type_text_output_formatter {
+        flag_t flag{};
+        
+        template <detail::std_basic_type Ty>
+        constexpr void operator()(std::string& buf, const Ty& value) {
+            if constexpr (detail::std_string_type_traits<Ty>::value) {
+                if (flag & string_use_raw) {
+                    buf.append("R\"(").append(value).append(")\"");
+                }
+                else {
+                    std::string cache;
+                    cache.reserve(value.size());
+                    for (std::size_t i = 0; i != value.size(); ++i) {
+                        switch (value[i]) {
+                        default: cache.push_back(value[i]); break;
+                        case '\n': cache.append("\\n");     break;
+                        case '\t': cache.append("\\t");     break;
+                        case '\r': cache.append("\\r");     break;
+                        case '\b': cache.append("\\b");     break;
+                        case '\v': cache.append("\\v");     break;
+                        case '\f': cache.append("\\f");     break;
+                        case '\a': cache.append("\\a");     break;
+                        case '\"': cache.append("\\\"");    break;
+                        case '\\': cache.append("\\");      break;
                         }
-                        archive_ptr->content().push_back(',');
                     }
-                    archive_ptr->content().back() = '}';
-                    archive_ptr->content().push_back(';');
+                    buf.push_back('\"');
+                    buf.append(cache);
+                    buf.push_back('\"');
                 }
             }
-        };
-
-        /////////////////////////////////////////////
-        /// Output Formater Implementation
-        ///////////////////////////////////////////// 
-        
-        template <typename Ty, bool IsRange>
-        struct text_output_formatter {};
-
-#define TEXT_OUTPUT_FORMATTER_INHERIT_METHODS() \
-        using text_output_formatter_base<text_output_formatter, IsRange>::type_string; \
-        using text_output_formatter_base<text_output_formatter, IsRange>::flag;        \
-        using text_output_formatter_base<text_output_formatter, IsRange>::archive_ptr  \
-        
-        template <std::integral Int, bool IsRange> requires !std::is_same_v<Int, bool>
-        struct text_output_formatter<Int, IsRange> : text_output_formatter_base<text_output_formatter<Int, IsRange>, IsRange> {
-            TEXT_OUTPUT_FORMATTER_INHERIT_METHODS();
-            std::string_view      neat_type_string;
-            std::string_view      raw_type_string;
-            char                  base = 10;
-
-            void context_setup() {
-                type_string = (flag & integer_neat_type) ? neat_type_string : raw_type_string;
-                base        = (flag & integer_form_binary) ? 2 : (flag & integer_form_heximal) ? 16 : 10;
-            }
-            
-            template <std::integral Ty>
-            void output_single_value(const Ty& v) {
-                char  value[512] = "\0";
-                char* value_begin = value;
-                switch (base) {
-                case 16:
-                    value[0] = '0';
-                    value[1] = 'x';
-                    value_begin += 2; break;
-                case 2:
-                    value[0] = '0';
-                    value[1] = 'b';
-                    value_begin += 2; break;
-                default: break;
-                }
-
-                char*  vend = std::to_chars(value_begin, value + 512, v, base).ptr;
-                if (base != 10) {
-                    std::for_each(value_begin, vend, [this](char& a) {
-                        a = (flag & integer_case_upper) ? std::toupper(a) : std::tolower(a);
-                    });
-                }
-                archive_ptr->content().append(value, vend - value);
-            }
-        };
-
-        template <std::floating_point Float, bool IsRange>
-        struct text_output_formatter<Float, IsRange> : text_output_formatter_base<text_output_formatter<Float, IsRange>, IsRange> {
-            TEXT_OUTPUT_FORMATTER_INHERIT_METHODS();
-            std::chars_format fmt = std::chars_format::general;
-            
-            void context_setup() {
+            else if constexpr (std::floating_point<Ty>) {
+                std::chars_format fmt = std::chars_format::general;
                 if (flag & floating_point_fixed)      { fmt = std::chars_format::fixed; }
                 if (flag & floating_point_scientific) { fmt = std::chars_format::scientific; }
+                char buffer[32];
+                auto end = std::to_chars(buffer, buffer + 32, value, fmt).ptr;
+                buf.append(buffer, end - buffer);
             }
-            template <std::floating_point Ty>
-            void output_single_value(const Ty& v) {
-                char  value[512] = "\0";
-                char* value_end = std::to_chars(value, value + 512, v, fmt).ptr;
-                // Change exponent to upper case.
-                if (flag & floating_point_char_upper)  {
-                    *std::find(value, value_end, 'e') = 'E';
+            else if constexpr (std::integral<Ty> && !std::is_same_v<Ty, bool>) {
+                int base = 10;
+                if constexpr (std::is_unsigned_v<Ty>) {
+                    if (flag & integer_binary)  { base = 2;   buf.append("0b"); }
+                    if (flag & integer_heximal) { base = 16;  buf.append("0x"); }
                 }
-                archive_ptr->content().append(value, value_end - value);
+                char buffer[32];
+                auto end = std::to_chars(buffer, buffer + 32, value, base).ptr;
+                buf.append(buffer, end - buffer);
             }
-        };
-
-        template <bool IsRange>
-        struct text_output_formatter<bool, IsRange> : text_output_formatter_base<text_output_formatter<bool, IsRange>, IsRange> {
-            TEXT_OUTPUT_FORMATTER_INHERIT_METHODS();
-            void context_setup() {
-                type_string = "bool";
+            else if constexpr (std::is_same_v<Ty, bool>) {
+                std::string_view v = value ? "true" : "false";
+                buf.append(v);
             }
-            void output_single_value(const bool& v) {
-                archive_ptr->content().append(v ? "true" : "false");
-            }
-        };
-
-        // Raw string is not supported for now.
-        template <class String, bool IsRange> requires std_string_type_traits<String>::value
-        struct text_output_formatter<String, IsRange> : text_output_formatter_base<text_output_formatter<String, IsRange>, IsRange> {
-            TEXT_OUTPUT_FORMATTER_INHERIT_METHODS();
-            void context_setup() {
-                type_string = "string";
-            }
-            void output_single_value(std::string_view v) {
-                // Do string handling.
-                std::string strbuf(v.size() + 2, '\0');
-                std::copy_n(v.begin(), v.size(), strbuf.begin() + 1);
-                for (auto i = strbuf.begin(); i != strbuf.end(); ++i) {
-                    switch (*i) {
-                        default: break;
-                        case '\"' : *i = '\"'; i = strbuf.insert(i, '\\'); ++i; break;
-                        case '\\' : *i = '\\'; i = strbuf.insert(i, '\\'); ++i; break;
-                        case '\t' : *i = 't';  i = strbuf.insert(i, '\\'); ++i; break;
-                        case '\n' : *i = 'n';  i = strbuf.insert(i, '\\'); ++i; break;
-                        case '\r' : *i = 'r';  i = strbuf.insert(i, '\\'); ++i; break;
-                        case '\v' : *i = 'v';  i = strbuf.insert(i, '\\'); ++i; break;
-                        case '\f' : *i = 'f';  i = strbuf.insert(i, '\\'); ++i; break;
-                        case '\a' : *i = 'a';  i = strbuf.insert(i, '\\'); ++i; break;
-                        case '\b' : *i = 'b';  i = strbuf.insert(i, '\\'); ++i; break;
-                    }
-                }
-                // Add quote.
-                strbuf.front() = '\"';
-                strbuf.back()  = '\"';
-                archive_ptr->content().append(strbuf);
-            }
-        };
-
-        template <std_basic_structure Structure, bool IsRange>
-        struct text_output_formatter<Structure, IsRange> : text_output_formatter_base<text_output_formatter<Structure, IsRange>, IsRange> {
-            TEXT_OUTPUT_FORMATTER_INHERIT_METHODS();
-            void context_setup() {
-                type_string = detail::get_tree_structure_type_string<Structure>();
-            }
-            void output_single_value(const Structure& v) {
-                auto formatter = [this]<typename T0>(const T0& lv) {
-                    text_output_formatter<T0, false> out;
-                    out.archive_ptr       = archive_ptr;
-                    out.flag              = {};
-                    out.output_single_value(lv);
-                };
-                detail::get_tree_structure_value_string(v, archive_ptr->content(), formatter);
-            }
-        };
-        
-#undef TEXT_OUTPUT_FORMATTER_INHERIT_METHODS
-    }
+        }
+    };
 
     /////////////////////////////////////
     /// Basic serializer specialization
     /////////////////////////////////////
-    
-    template <std_basic_type Ty>
-    struct serializer<Ty>  {
+    template <std_type Ty>
+    struct serializer<Ty> {
         constexpr void operator()(archive& arch, std::string_view name, const Ty& v, flag_t flag) {
-            detail::text_output_formatter<Ty, false> out;
-            out.archive_ptr       = &arch;
-            out.flag              = flag;
-            if constexpr (std::is_integral_v<Ty> && !std::is_same_v<Ty, bool>) {
-                out.raw_type_string   = detail::std_basic_type_string<Ty>::raw;
-                out.neat_type_string  = detail::std_basic_type_string<Ty>::neat;
-            }
-            if constexpr (std::is_floating_point_v<Ty>) {
-                out.type_string       = detail::std_basic_type_string<Ty>::default_name;
-            }
-            out.output_values(name, &v);
+            std_basic_type_text_output_formatter formatter{flag};
+            arch.content().append(std_type_name_string<Ty>()).push_back(' ');
+            arch.content().append(name).push_back('=');
+            arch.content().append(std_type_value_string(v, formatter));
         }
         constexpr void operator()(archive& arch, std::string::const_iterator& mem_begin, Ty& v) {
             // TODO IMPLEMENT ME!
         }
     };
-
-    template <std_forward_container SimpleContainer> requires std_basic_type<typename SimpleContainer::value_type>
-    struct serializer<SimpleContainer> {
-        constexpr void operator()(archive& arch, std::string_view name, const SimpleContainer& c, flag_t flag) {
-            using value_type = typename SimpleContainer::value_type;
-            detail::text_output_formatter<value_type, true> out;
-            out.archive_ptr       = &arch;
-            out.flag              = flag;
-            out.length            = c.size();
-            if constexpr (std::is_integral_v<value_type> && !std::is_same_v<value_type, bool>) {
-                out.raw_type_string   = detail::std_basic_type_string<value_type>::raw;
-                out.neat_type_string  = detail::std_basic_type_string<value_type>::neat;
-            }
-            if constexpr (std::is_floating_point_v<value_type>) {
-                out.type_string       = detail::std_basic_type_string<value_type>::default_name;
-            }
-            out.output_values(name, c.cbegin());
-        }
-        constexpr void operator()(archive& arch, std::string::const_iterator& mem_begin, SimpleContainer& v) {
-            // TODO IMPLEMENT ME!
-        }
-    };
-
-    template <std_basic_structure Structure>
-    struct serializer<Structure> {
-        constexpr void operator()(archive& arch, std::string_view name, const Structure& v, flag_t flag) {
-            detail::text_output_formatter<Structure, false> out;
-            out.archive_ptr       = &arch;
-            out.flag              = flag;
-            out.output_values(name, &v);
-        }
-        constexpr void operator()(archive& arch, std::string::const_iterator& mem_begin, Structure& v) {
-            // TODO IMPLEMENT ME!
-        }
-    };
-
-    template <std_forward_container StructureContainer> requires std_basic_structure<typename StructureContainer::value_type>
-    struct serializer<StructureContainer> {
-        constexpr void operator()(archive& arch, std::string_view name, const StructureContainer& v, flag_t flag) {
-            detail::text_output_formatter<typename StructureContainer::value_type, true> out;
-            out.archive_ptr       = &arch;
-            out.flag              = flag;
-            out.length            = v.size();
-            out.output_values(name, v.cbegin());
-        }
-        constexpr void operator()(archive& arch, std::string::const_iterator& mem_begin, StructureContainer& v) {
-            // TODO IMPLEMENT ME!
-        }
-    };
+    
 }
