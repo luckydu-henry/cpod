@@ -83,7 +83,7 @@ namespace cpod {
     class archive {
         std::string content_;
     public:
-        archive() = default;
+        archive() : content_() {}
         archive(std::string_view c) : content_(c) {}
         
         constexpr std::string&        content()       { return content_; }
@@ -96,8 +96,8 @@ namespace cpod {
         constexpr std::string::const_iterator find_variable_begin(std::string_view var_name);
 
         template <class Ty>
-        constexpr archive& operator<<(const variable_view<Ty> v) {
-            serializer<Ty>{}(*this, v.name, *v.value, v.flag);
+        constexpr archive& operator<<(variable_view<Ty> v) {
+            serializer<Ty>{}(content_, v.name, *v.value, v.flag);
             return *this;
         }
 
@@ -146,7 +146,13 @@ struct std_basic_type_traits<std::remove_cvref_t<##type##>> : std::true_type { \
         DEFINE_STD_BASIC_TYPE_STRING(float,         9);
         DEFINE_STD_BASIC_TYPE_STRING(double,        10);
         DEFINE_STD_BASIC_TYPE_STRING(bool,          11);
-        DEFINE_STD_BASIC_TYPE_STRING(std::string,   12);
+
+        // To support custom compiler string.
+        template <class Allocator>
+        struct std_basic_type_traits<std::basic_string<char, std::char_traits<char>, Allocator>> : std::true_type {
+            static constexpr std::string_view name = "std::string" ;
+            static constexpr std::uint8_t identifier = 12;
+        };
 
         // String and string_view uses same type name.
         template <>
@@ -197,15 +203,20 @@ template <typename K, typename V, typename ... OtherStuff> \
         DEFINE_MONO_STL_TRAITS(std::deque,                14, true);
         DEFINE_MONO_STL_TRAITS(std::list,                 15, true);
         DEFINE_MONO_STL_TRAITS(std::forward_list,         16, true);
-        DEFINE_MONO_STL_TRAITS(std::set,                  17, false);
-        DEFINE_MONO_STL_TRAITS(std::multiset,             18, false);
-        DEFINE_MONO_STL_TRAITS(std::unordered_set,        19, false);
-        DEFINE_MONO_STL_TRAITS(std::unordered_multiset,   20, false);
+        
+//        std::hive as a new basic std container will join the family in C++26
+//        So we leave this position for it in case future code won't compatible with old code.
+//        DEFINE_MONO_STL_TRAITS(std::hive,                 17, false);
+        
+        DEFINE_MONO_STL_TRAITS(std::set,                  18, false);
+        DEFINE_MONO_STL_TRAITS(std::multiset,             19, false);
+        DEFINE_MONO_STL_TRAITS(std::unordered_set,        20, false);
+        DEFINE_MONO_STL_TRAITS(std::unordered_multiset,   21, false);
 
-        DEFINE_DOUBLE_STL_TRAITS(std::map,                21);
-        DEFINE_DOUBLE_STL_TRAITS(std::multimap,           22);
-        DEFINE_DOUBLE_STL_TRAITS(std::unordered_map,      23);
-        DEFINE_DOUBLE_STL_TRAITS(std::unordered_multimap, 24);
+        DEFINE_DOUBLE_STL_TRAITS(std::map,                22);
+        DEFINE_DOUBLE_STL_TRAITS(std::multimap,           23);
+        DEFINE_DOUBLE_STL_TRAITS(std::unordered_map,      24);
+        DEFINE_DOUBLE_STL_TRAITS(std::unordered_multimap, 25);
 
         template <typename K, typename V>
         struct std_template_library_type_traits<std::pair<K, V>> : std::true_type {
@@ -213,7 +224,7 @@ template <typename K, typename V, typename ... OtherStuff> \
             static constexpr bool             is_mono            = false;
             static constexpr bool             is_double          = false; 
             static constexpr std::string_view name               = "std::pair";
-            static constexpr std::uint8_t     identifier         = 25;
+            static constexpr std::uint8_t     identifier         = 26;
         };
 
         template <typename Ty, std::size_t N>
@@ -222,7 +233,7 @@ template <typename K, typename V, typename ... OtherStuff> \
             static constexpr bool             is_mono            = false;
             static constexpr bool             is_double          = false; 
             static constexpr std::string_view name               = "std::array";
-            static constexpr std::uint8_t     identifier         = 26;
+            static constexpr std::uint8_t     identifier         = 27;
             
         };
 
@@ -232,7 +243,7 @@ template <typename K, typename V, typename ... OtherStuff> \
             static constexpr bool             is_mono            = false;
             static constexpr bool             is_double          = false; 
             static constexpr std::string_view name               = "std::tuple";
-            static constexpr std::uint8_t     identifier         = 27;
+            static constexpr std::uint8_t     identifier         = 28;
         };
 #undef DEFINE_DOUBLE_STL_TRAITS
 #undef DEFINE_MONO_STL_TRAITS
@@ -312,6 +323,26 @@ template <typename K, typename V, typename ... OtherStuff> \
                 buf.back() = '}';
                 buf.push_back(',');
             }
+            template <class Reader>
+            constexpr auto operator()(std::string::const_iterator& iter, Reader reader, STL& value, int department) {
+                const std::size_t n = *reinterpret_cast<const std::size_t*>(&*iter);
+                iter += sizeof(std::size_t);
+                auto inserter = std::inserter(value, value.end());
+                for (std::size_t i = 0; i != n; ++i) {
+                    if constexpr (std_template_library_type_traits<STL>::is_mono) {
+                        typename STL::value_type cache;
+                        iterate_std_template_stuff_impl<typename STL::value_type>{}(iter, reader, cache, department);
+                        *inserter++ = std::move(cache);
+                    }
+                    else if constexpr (std_template_library_type_traits<STL>::is_double) {
+                        typename STL::key_type                key;
+                        typename STL::value_type::second_type val;
+                        iterate_std_template_stuff_impl<typename STL::key_type>{}               (iter, reader, key, department);
+                        iterate_std_template_stuff_impl<typename STL::value_type::second_type>{}(iter, reader, val, department);
+                        *inserter++ = std::make_pair(key, val);
+                    }
+                }
+            }
         };
 
         template <typename F, typename S>
@@ -320,7 +351,7 @@ template <typename K, typename V, typename ... OtherStuff> \
                 if (!bin) {
                     buf.append("std::pair<");
                 } else {
-                    buf.push_back('\x19');
+                    buf.push_back('\x1a');
                     buf.push_back('<');
                 }
                 iterate_std_template_recursive_helper<F, S>{}(buf, bin);
@@ -335,6 +366,11 @@ template <typename K, typename V, typename ... OtherStuff> \
                 buf.back() = '}';
                 buf.push_back(',');
             }
+            template <class Reader>
+            constexpr auto operator()(std::string::const_iterator& iter, Reader reader, std::pair<F, S>& value, int department) {
+                iterate_std_template_stuff_impl<F>{}(iter, reader, value.first, department);
+                iterate_std_template_stuff_impl<F>{}(iter, reader, value.second, department);
+            }
         };
         
         template <typename Ty, std::size_t N>
@@ -345,12 +381,19 @@ template <typename K, typename V, typename ... OtherStuff> \
                     iterate_std_template_stuff_impl<Ty>{}(buf, formatter, std::get<Index>(value));
                     write_array<Index + 1, Formatter>(buf, formatter, value);
                 }
-            } 
+            }
+            template <std::size_t Index = 0, class Reader>
+            constexpr void read_array(std::string::const_iterator& iter, Reader reader, std::array<Ty, N>& value, int department) {
+                if constexpr (Index < N) {
+                    iterate_std_template_stuff_impl<Ty>{}(iter, reader, std::get<Index>(value), department);
+                    read_array<Index + 1, Reader>(iter, reader, value, department);
+                }
+            }
             constexpr auto operator()(std::string& buf, bool bin) const {
                 if (!bin) {
                     buf.append("std::array<");
                 } else {
-                    buf.push_back('\x1a');
+                    buf.push_back('\x1b');
                     buf.push_back('<');
                 }
                 iterate_std_template_stuff_impl<Ty>{}(buf, bin);
@@ -369,6 +412,10 @@ template <typename K, typename V, typename ... OtherStuff> \
                 buf.back() = '}';
                 buf.push_back(',');
             }
+            template <class Reader>
+            constexpr auto operator()(std::string::const_iterator& iter, Reader reader, std::array<Ty, N>& value, int department) {
+                read_array(iter, reader, value, department);
+            }
         };
 
         template <class ... Args>
@@ -380,11 +427,19 @@ template <typename K, typename V, typename ... OtherStuff> \
                     write_tuple<Index + 1, Formatter>(buf, formatter, value);
                 }
             }
+            template <std::size_t Index = 0, class Reader>
+            constexpr void read_tuple(std::string::const_iterator& iter, Reader reader, std::tuple<Args...>& value, int department) {
+                if constexpr (Index < sizeof ... (Args)) {
+                    iterate_std_template_stuff_impl<std::tuple_element_t<Index, std::tuple<Args...>>>{}(iter, reader, std::get<Index>(value), department);
+                    read_tuple<Index + 1, Reader>(iter, reader, value, department);
+                }
+            }
             constexpr auto operator()(std::string& buf, bool bin) const {
                 if (!bin) {
                     buf.append("std::tuple<");
                 } else {
-                    buf.push_back('\x1b');
+                    buf.push_back('\x1c');
+                    buf.push_back('<');
                 }
                 iterate_std_template_recursive_helper<Args...>{}(buf, bin);
                 buf.back() = '>';
@@ -396,6 +451,10 @@ template <typename K, typename V, typename ... OtherStuff> \
                 write_tuple(buf, formatter, value);
                 buf.back() = '}';
                 buf.push_back(',');
+            }
+            template <class Reader>
+            constexpr auto operator()(std::string::const_iterator& iter, Reader reader, std::tuple<Args...>& value, int department) {
+                read_tuple(iter, reader, value, department);
             }
         };
         
@@ -410,7 +469,7 @@ template <typename K, typename V, typename ... OtherStuff> \
         std::string buffer;
         details::iterate_std_template_stuff_impl<Ty>{}(buffer, bin);
         if (!bin) {
-            buffer.pop_back(); // Remove last ,
+            buffer.pop_back(); // Remove last ','
         }
         else {
             buffer.back() = '\0';
@@ -490,7 +549,6 @@ template <typename K, typename V, typename ... OtherStuff> \
         }
     };
 
-
     struct std_basic_type_binary_input_reader {
         flag_t flag{};
         
@@ -527,14 +585,14 @@ template <typename K, typename V, typename ... OtherStuff> \
             "int",          "uint32_t",  "int64_t",        "uint64_t",
             "float",        "double",    "bool",           "std::string",    
             // Containers.
-            "std::vector", "std::deque",  "std::list", "std::forward_list", "std::set", "std::multiset",
+            "std::vector", "std::deque",  "std::list", "std::forward_list", "std::hive", "std::set", "std::multiset",
             "std::unordered_set", "std::unordered_multiset", "std::map", "std::multimap", "std::unordered_map", "std::unordered_multimap",
             "std::pair",           "std::array",             "std::tuple",
             
             // Structure.
             "struct",
         };
-        
+
         static constexpr std::string_view operators[] = {
             ",", "{", "}", "<", ">", ";", "="
         };
@@ -583,7 +641,6 @@ template <typename K, typename V, typename ... OtherStuff> \
                             if (i == std::string_view::npos) {
                                 return;
                             }
-                            ++i;
                         }
                         // Multi line comment.
                         else if (src[i + 1] == '*') {
@@ -597,7 +654,7 @@ template <typename K, typename V, typename ... OtherStuff> \
                             msg = "Invalid character after /";
                             return;
                         }
-                    }
+                    } break;
                 default: out.push_back(src[i]); break;
                 }
             }
@@ -621,7 +678,7 @@ template <typename K, typename V, typename ... OtherStuff> \
                         i = j + 1;
                     } break;
                 case '\"': {
-                    // Doesn't support multiline string now.
+                    // Doesn't support multiline string.
                     std::size_t j = i + 1;
                     out.append("\"(");
                     for (; j != src.length() && (src[j] != '\"' || src[j - 1] == '\\'); ++j) {
@@ -663,7 +720,9 @@ template <typename K, typename V, typename ... OtherStuff> \
         constexpr void tokenize_source(Iter it) noexcept {
             for (std::size_t i = 0; i < src.length(); ++i) {
                 if (std::isspace(src[i])) {
-                    auto p = std::find_if_not(&src[i], &src[src.length()], std::isspace);
+                    auto p = std::find_if_not(&src[i], &src[src.length()], [](auto& c) {
+                        return std::isspace(static_cast<int>(c));
+                    });
                     i = p - src.data() - 1;
                 }
                 else if (std::isalpha(src[i]) || src[i] == '_' || src[i] == ':') {
@@ -794,39 +853,48 @@ template <typename K, typename V, typename ... OtherStuff> \
                 switch(tid) {
                 default: break;
                 // Sequential containers (not map nor pair && tuple && array)
-                case 13: case 14: case 15: case 16: case 17: case 18: case 19: case 20:
+                case 13: case 14: case 15: case 16: case 17: case 18: case 19: case 20: case 21:
                     for (auto k = vtb; k != vte; ++n) {
                         k = compile_std_values_recursively(ttb, tte, std::next(k), vte, cache).second;
                     }
-                    buf.append(reinterpret_cast<const char*>(&n), sizeof(n)); break;
+                    buf.append(reinterpret_cast<const char*>(&n), sizeof(n));
+                    buf.append(cache);
+                    return std::make_pair(std::next(tte), std::next(vte));
                 // Mapping containers 
-                case 21: case 22: case 23: case 24:
+                case 22: case 23: case 24: case 25:
                     for (auto k = vtb; k != vte; ++n) {
                         auto p1 = compile_std_values_recursively(ttb, tte, std::next(k, 2), vte, cache);
                         auto p2 = compile_std_values_recursively(std::next(p1.first), tte, std::next(p1.second), vte, cache);
                         k = std::next(p2.second);
                     }
-                    buf.append(reinterpret_cast<const char*>(&n), sizeof(n)); break;
+                    buf.append(reinterpret_cast<const char*>(&n), sizeof(n));
+                    buf.append(cache);
+                    return std::make_pair(std::next(tte), std::next(vte));
                 // std::pair;
-                case 25: {
+                case 26: {
                     auto p1 = compile_std_values_recursively(ttb, tte, std::next(vtb), vte, cache);
-                    auto p2 = compile_std_values_recursively(std::next(p1.first), tte, std::next(p1.second), vte, cache); break; }
+                    auto p2 = compile_std_values_recursively(std::next(p1.first), tte, std::next(p1.second), vte, cache); }
+                    buf.append(cache);
+                    return std::make_pair(std::next(tte), std::next(vte));
                 // std::array
-                case 26:
+                case 27:
                     // The only difference between sequential containers is this do not write n into the buffer.
                     for (auto k = vtb; k != vte;) {
                         k = compile_std_values_recursively(ttb, tte, std::next(k), vte, cache).second;
-                    } break;
+                    }
+                    buf.append(cache);
+                    return std::make_pair(std::next(tte), std::next(vte));
                 // std::tuple.
-                case 27:
+                case 28:
                     for (Iter k = vtb, l = ttb;k != vte && l != tte;) {
                         auto c = compile_std_values_recursively(l, tte, std::next(k), vte, cache);
                         l = std::next(c.first);
                         k = c.second;
-                    } break;
+                    }
+                    buf.append(cache);
+                    return std::make_pair(std::next(tte), std::next(vte));
                 }
                 // Common operation that writes cache to the buffer and move forward iterator.
-                buf.append(cache);
                 return std::make_pair(std::next(tte), std::next(vte));
             }
         }
@@ -840,7 +908,9 @@ template <typename K, typename V, typename ... OtherStuff> \
                 else if (*it == ">") { buf.push_back('>'); }
                 else {
                     // For array size.
-                    if (std::all_of(it->begin(), it->end(), std::isdigit)) {
+                    if (std::all_of(it->begin(), it->end(), [](auto& c) {
+                        return std::isdigit(static_cast<int>(c));
+                    })) {
                         std::size_t n = 0;
                         std::from_chars(&*it->begin(), (&*it->rbegin()) + 1, n);
                         buf.append(reinterpret_cast<const char*>(&n), sizeof(std::size_t));
@@ -862,7 +932,7 @@ template <typename K, typename V, typename ... OtherStuff> \
                 // Ignore struct for now.
                 if (auto i = std::find(std::begin(keywords), std::end(keywords), *t); i != std::end(keywords)) {
                     if (*t == "struct") {
-                        // TODO: IMPLEMENTE STRUCTURE
+                        // TODO: IMPLEMENT STRUCTURE
                         // I'm still working on this!
                         // Another recursive hell really.
                     }
@@ -887,9 +957,11 @@ template <typename K, typename V, typename ... OtherStuff> \
                         out.append(value_cache);
                         t = semico;
                     }
-                } // keyword if.
+                } else {
+                    continue;
+                }
             } // for loop
-            const std::size_t end_mark = 1;
+            constexpr std::size_t end_mark = 0;
             out.append(reinterpret_cast<const char*>(&end_mark), sizeof(std::size_t));
         } // Generate byte code.
     };
@@ -906,13 +978,12 @@ template <typename K, typename V, typename ... OtherStuff> \
         // Skip-field variable checking & searching method.
         auto offset_block = content_.cbegin();
         for (std::size_t
-            offset = *reinterpret_cast<const std::size_t*>(&*offset_block); offset != 0;
+            offset = *reinterpret_cast<const std::size_t*>(&*offset_block);
+            offset != 0;
             offset = *reinterpret_cast<const std::size_t*>(&*offset_block)) {
             // A very weird technique I developed. 
             offset_block += sizeof(std::size_t);
-            auto i = std::find(offset_block, content_.cend(), '\0') + 1;
-            auto j = std::find(i, content_.cend(), '\0') + 1;
-            if (std::equal(offset_block, j, type_and_name.cbegin(), type_and_name.cend())) {
+            if (std::equal(type_and_name.cbegin(), type_and_name.cend(), offset_block)) {
                 return offset_block + type_and_name.size(); // Locate to the beginning of data part.
             }
             offset_block += static_cast<std::ptrdiff_t>(offset);
@@ -922,7 +993,7 @@ template <typename K, typename V, typename ... OtherStuff> \
     
     constexpr std::string archive::compile_content_default() noexcept {
         cpp_subset_compiler compiler(std::move(content_));
-        std::list<std::string_view> token_list;
+        std::vector<std::string_view> token_list;
         compiler.remove_comments();            compiler.src = compiler.out;
         compiler.normalize_string_literals();  compiler.src = compiler.out;
         compiler.tokenize_source(std::back_inserter(token_list));
@@ -937,13 +1008,14 @@ template <typename K, typename V, typename ... OtherStuff> \
     
     template <std_type Ty>
     struct serializer<Ty> {
-        constexpr void operator()(archive& arch, std::string_view name, const Ty& v, flag_t flag) {
+        constexpr void operator()(std::string& content, std::string_view name, const Ty& v, flag_t flag) {
             std_basic_type_text_output_formatter formatter{flag};
-            arch.content().append(std_type_name_string<Ty>()).push_back(' ');
-            arch.content().append(name).push_back('=');
-            arch.content().append(std_type_value_string(v, formatter));
+            content.append(std_type_name_string<Ty>()).push_back(' ');
+            content.append(name).push_back('=');
+            content.append(std_type_value_string(v, formatter));
         }
         constexpr void operator()(std::string::const_iterator& mem_begin, Ty& v, flag_t flag) {
+            // Reader is much shorter and thus faster.
             std_basic_type_binary_input_reader reader{flag};
             details::iterate_std_template_stuff_impl<Ty>{}(mem_begin, reader, v, 0);
         }
