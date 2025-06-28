@@ -674,7 +674,7 @@ template <typename K, typename V, typename ... OtherStuff> \
                             msg = "Unmatched raw string literals!";
                             return;
                         }
-                        out.append(std::string_view(src.data() + i, j + 2 - i));
+                        out.append(std::string_view(src.data() + i + 1, j + 1 - i));
                         i = j + 1;
                     } break;
                 case '\"': {
