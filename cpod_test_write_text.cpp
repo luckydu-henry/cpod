@@ -34,7 +34,7 @@
 
 int main(int argc, char** argv) {
     cpod::archive arch;
-
+    
     std::string           myName        = "Henry Du";
     std::string           myGender      = "Male";
     uint8_t               myAge         = 17;
@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
          << cpod::var("gender", myGender) << '\n'
          << cpod::var("age", myAge) << '\n'
          << cpod::var("emails", myEmails) << '\n';
-
+    
     std::ofstream out_text("personal_info.cpod.hpp");
     out_text << "#include <string>\n#include <set>\n";
     out_text << arch.content();

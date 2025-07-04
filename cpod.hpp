@@ -25,6 +25,7 @@
 
 // Core headers
 #include <string>
+#include <string_view>
 #include <ranges>
 #include <utility>
 #include <algorithm>
@@ -659,12 +660,62 @@ template <typename K, typename V, typename ... OtherStuff> \
                 }
             }
         } // remove_comments.
+        
+        // We don't need function macro since cpod doesn't support expssions.
+        constexpr void replace_remove_macros() {
+            out.clear();
+            out.reserve(src.size());
+            std::unordered_map<std::string_view, std::string_view> macro_map;
+            for (std::size_t i = 0; i != src.size(); ++i) {
+                switch (src[i]) {
+                default: out.push_back(src[i]); break;
+                case '#': {
+                    char *k = &src[i];
+                    char *l = nullptr;
+                    k = std::find_if_not(k + 1, &src[src.length()], [](auto& c) { return std::isspace(c); });
+                    if (std::memcmp(&*k, "define", 6) != 0) {
+                        msg = "Invalid macro command after #";
+                        return;
+                    }
+                    k = std::find_if_not(k + 6, &src[src.length()], [](auto& c) { return std::isspace(c); });
+                    l = std::find_if(k, &src[src.length()], [](auto& c) { return std::isspace(c); });
+                    const std::string_view macro_key(k, l - k);
+
+                    k = std::find_if_not(l, &src[src.length()], [](auto& c) { return std::isspace(c); });
+                    l = std::find_if(k, &src[src.length()], [](auto& c) { return c == '\n'; });
+                    const std::string_view macro_value(k, l - k);
+                    macro_map.insert(std::make_pair(macro_key, macro_value));
+                    
+                    i += (l - &src[i]);
+                } break;
+                case 'a': case 'b': case 'c': case 'd': case 'e': case 'f':
+                case 'g': case 'h': case 'i': case 'j': case 'k': case 'l':
+                case 'm': case 'n': case 'o': case 'p': case 'q': case 's':
+                case 't': case 'u': case 'v': case 'w': case 'x': case 'y': case 'z':
+                case 'A': case 'B': case 'C': case 'D': case 'E': case 'F':
+                case 'G': case 'H': case 'I': case 'J': case 'K': case 'L':
+                case 'M': case 'N': case 'O': case 'P': case 'Q': case 'S':
+                case 'T': case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z':
+                case '_': {
+                    char* k = &src[i];
+                    k = std::find_if_not(&src[i], &src[src.length()], [](auto& c) { return std::isalnum(c) || std::isdigit(c) || c == ':' || c == '_'; });
+                    std::string_view key(&src[i], k - &src[i]);
+                    if (macro_map.contains(key)) {
+                        out.append(macro_map[key]);
+                    } else {
+                        out.append(key);
+                    }
+                    i += k - &src[i] - 1;
+                } break;
+                }
+            }
+        }
 
         // Change all escape characters to their original forms.
         // And all string literals will be raw string (with R prefix) after this method call.
         constexpr void normalize_string_literals() noexcept {
             out.clear();
-            out.reserve(out.size() + 1);
+            out.reserve(src.size());
             for (std::size_t i = 0; i != src.length(); ++i) {
                 switch (src[i]) {
                 case 'R':
@@ -773,6 +824,10 @@ template <typename K, typename V, typename ... OtherStuff> \
                 const char* beg  = value.data();
                 int   base = 10;
                 if (value[0] == '0') {
+                    // Means we have only one zero.
+                    if (value.length() == 1) {
+                        return 0;
+                    }
                     if (value[1] == 'x' || value[1] == 'X') {
                         base = 16; beg += 2;
                     }
@@ -995,6 +1050,7 @@ template <typename K, typename V, typename ... OtherStuff> \
         cpp_subset_compiler compiler(std::move(content_));
         std::vector<std::string_view> token_list;
         compiler.remove_comments();            compiler.src = compiler.out;
+        compiler.replace_remove_macros();      compiler.src = compiler.out;
         compiler.normalize_string_literals();  compiler.src = compiler.out;
         compiler.tokenize_source(std::back_inserter(token_list));
         compiler.generate_byte_code(token_list);

@@ -41,8 +41,7 @@ int main() {
     std::string   cleaner_source;
     std::string   source_line;
     while (std::getline(source_file, source_line)) {
-        // Remove header comments.
-        if (source_line[0] != '#' || (source_line[0] == '/' && source_line[1] != '/')) {
+        if (!(source_line[0] == '#' && source_line[1] != 'd')) {
             source_line.push_back('\n');
             cleaner_source += source_line;
         }
@@ -71,17 +70,23 @@ int main() {
 
     // You can use custom string allocator.
     // Also, available to other container types.
-    std::pmr::string mesh_name; 
+    std::pmr::string mesh_name;
+
+    int enum_number = 0;
     
     // Empty means no error message.
     if (msg.empty()) {
         try {
             arch
             >> cpod::var("position_color_uv_vertices", position_color_uv_vertices)
-            >> cpod::var("mesh_name", mesh_name);
+            >> cpod::var("mesh_name", mesh_name)
+            >> cpod::var("enum_number",  enum_number);
             
             std::cout << "Read mesh : " << mesh_name << '\n';
-            std::cout << "---------------------------------------------" << std::endl;
+            std::cout << "---------------------------------------------\n";
+
+            std::cout << "Enum number : " << enum_number << '\n';
+            std::cout << "---------------------------------------------\n";
             // Same to inline version but read dynamically.
             for (std::size_t i = 0; i != position_color_uv_vertices.size(); ++i) {
             

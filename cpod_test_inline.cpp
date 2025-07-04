@@ -33,6 +33,9 @@
 int main(int argc, char ** argv) {
     std::cout << "Read mesh : " << mesh_name << '\n';
     std::cout << "---------------------------------------------" << std::endl;
+
+    std::cout << "Enum number : " << enum_number << '\n';
+    std::cout << "---------------------------------------------\n";
     for (std::size_t i = 0; i != position_color_uv_vertices.size(); ++i) {
 
         auto& pos = std::get<0>(position_color_uv_vertices[i]);

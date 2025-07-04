@@ -38,7 +38,6 @@
 ///         void* or any type*                         (Pointer syntax).
 ///         type name[len] array syntax                (Use std::vector for dynamic array and std::array for fixed size array).
 ///         struct/class                               (Will have future support).
-///         macro e.g. # operator                      (Maybe will support this in the future).
 ///         namespace syntax                           (Definitely will have in the future).
 ///         separate string e.g. "A""B" == "AB"        (Not a very important feature, maybe will have but use R"()" string for now).
 ///         
@@ -55,8 +54,19 @@
 #include <tuple>
 #include <utility>
 
+// This is the recommended usage of macro.
+// Do not support macro functions since cpod itself doesn't have expression support either so it's unnecessary to have macro functions.
+#define ENUM_NONE   0
+#define ENUM_FIRST  1
+#define ENUM_SECOND 2
+#define ENUM_THIRD  3
+#define ENUM_FOURTH 4
+
 static inline const
 std::string mesh_name = "Mesh_Square";
+
+static inline const
+int  enum_number = ENUM_FOURTH;
 
 static inline const 
 std::vector<
@@ -70,6 +80,26 @@ position_color_uv_vertices = {
     {{ 1.F, 1.F, 0.F}, {1.F,0.F,0.F}, {1.F, 0.F}},
     {{ 1.F,-1.F, 0.F}, {0.F,1.F,0.F}, {0.F, 1.F}},
     {{-1.F, 1.F, 0.F}, {0.F,0.F,1.F}, {1.F, 1.F}},
-    {{-1.F,-1.F, 0.F}, {0.F,0.F,0.F}, {0.F, 0.F}}
-    // More vertices as our will.
+    {{-1.F,-1.F, 0.F}, {0.F,0.F,0.F}, {0.F, 0.F}},
+    
+{{ 1.F, 1.F, 0.F}, {1.F,0.F,0.F}, {1.F, 0.F}},
+{{ 1.F,-1.F, 0.F}, {0.F,1.F,0.F}, {0.F, 1.F}},
+{{-1.F, 1.F, 0.F}, {0.F,0.F,1.F}, {1.F, 1.F}},
+{{-1.F,-1.F, 0.F}, {0.F,0.F,0.F}, {0.F, 0.F}},
+
+{{ 1.F, 1.F, 0.F}, {1.F,0.F,0.F}, {1.F, 0.F}},
+{{ 1.F,-1.F, 0.F}, {0.F,1.F,0.F}, {0.F, 1.F}},
+{{-1.F, 1.F, 0.F}, {0.F,0.F,1.F}, {1.F, 1.F}},
+{{-1.F,-1.F, 0.F}, {0.F,0.F,0.F}, {0.F, 0.F}},
+
+{{ 1.F, 1.F, 0.F}, {1.F,0.F,0.F}, {1.F, 0.F}},
+{{ 1.F,-1.F, 0.F}, {0.F,1.F,0.F}, {0.F, 1.F}},
+{{-1.F, 1.F, 0.F}, {0.F,0.F,1.F}, {1.F, 1.F}},
+{{-1.F,-1.F, 0.F}, {0.F,0.F,0.F}, {0.F, 0.F}}
 };
+
+#undef ENUM_FIRST
+#undef ENUM_SECOND
+#undef ENUM_THIRD
+#undef ENUM_FOURTH
+#undef ENUM_NONE
