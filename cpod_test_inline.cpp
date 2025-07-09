@@ -25,12 +25,12 @@
 //              A quick demo to show how to use inline solution
 ////////////////////////////////////////////////////////////////////////////////////
 
-
 #include "test_v1.cpod.hpp" // Include this straightforward is the best performance usage
 #include <iostream>
 #include <format>
 
 int main(int argc, char ** argv) {
+    
     std::cout << "Read mesh : " << mesh_name << '\n';
     std::cout << "---------------------------------------------" << std::endl;
 

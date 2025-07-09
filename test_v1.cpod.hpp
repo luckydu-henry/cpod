@@ -41,6 +41,8 @@
 ///         namespace syntax                           (Definitely will have in the future).
 ///         separate string e.g. "A""B" == "AB"        (Not a very important feature, maybe will have but use R"()" string for now).
 ///         
+/// !!!! What's more to let macro preprocessor runs correctly, you must use LF text mode, CRLF may have bugs !!!
+/// 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///
 
@@ -62,6 +64,11 @@
 #define ENUM_THIRD  3
 #define ENUM_FOURTH 4
 
+// Since there are no expressions inside cpod, using typedef and macro have no much difference, macros can even be a lot
+// more flexible, so use this to do complex type aliasing.
+// But now I haven't supported recursive macro yet, will have it in the future.
+#define position_color_uv_vertex_type std::tuple<std::array<float, 3>, std::array<float, 3>,  std::array<float, 2>>
+
 static inline const
 std::string mesh_name = "Mesh_Square";
 
@@ -69,33 +76,27 @@ static inline const
 int  enum_number = ENUM_FOURTH;
 
 static inline const 
-std::vector<
-    std::tuple<
-        std::array<float, 3>,
-        std::array<float, 3>, 
-        std::array<float, 2>
-    >
->
+std::vector<position_color_uv_vertex_type>
 position_color_uv_vertices = {
     {{ 1.F, 1.F, 0.F}, {1.F,0.F,0.F}, {1.F, 0.F}},
     {{ 1.F,-1.F, 0.F}, {0.F,1.F,0.F}, {0.F, 1.F}},
     {{-1.F, 1.F, 0.F}, {0.F,0.F,1.F}, {1.F, 1.F}},
     {{-1.F,-1.F, 0.F}, {0.F,0.F,0.F}, {0.F, 0.F}},
     
-{{ 1.F, 1.F, 0.F}, {1.F,0.F,0.F}, {1.F, 0.F}},
-{{ 1.F,-1.F, 0.F}, {0.F,1.F,0.F}, {0.F, 1.F}},
-{{-1.F, 1.F, 0.F}, {0.F,0.F,1.F}, {1.F, 1.F}},
-{{-1.F,-1.F, 0.F}, {0.F,0.F,0.F}, {0.F, 0.F}},
+    {{ 1.F, 1.F, 0.F}, {1.F,0.F,0.F}, {1.F, 0.F}},
+    {{ 1.F,-1.F, 0.F}, {0.F,1.F,0.F}, {0.F, 1.F}},
+    {{-1.F, 1.F, 0.F}, {0.F,0.F,1.F}, {1.F, 1.F}},
+    {{-1.F,-1.F, 0.F}, {0.F,0.F,0.F}, {0.F, 0.F}},
 
-{{ 1.F, 1.F, 0.F}, {1.F,0.F,0.F}, {1.F, 0.F}},
-{{ 1.F,-1.F, 0.F}, {0.F,1.F,0.F}, {0.F, 1.F}},
-{{-1.F, 1.F, 0.F}, {0.F,0.F,1.F}, {1.F, 1.F}},
-{{-1.F,-1.F, 0.F}, {0.F,0.F,0.F}, {0.F, 0.F}},
-
-{{ 1.F, 1.F, 0.F}, {1.F,0.F,0.F}, {1.F, 0.F}},
-{{ 1.F,-1.F, 0.F}, {0.F,1.F,0.F}, {0.F, 1.F}},
-{{-1.F, 1.F, 0.F}, {0.F,0.F,1.F}, {1.F, 1.F}},
-{{-1.F,-1.F, 0.F}, {0.F,0.F,0.F}, {0.F, 0.F}}
+    {{ 1.F, 1.F, 0.F}, {1.F,0.F,0.F}, {1.F, 0.F}},
+    {{ 1.F,-1.F, 0.F}, {0.F,1.F,0.F}, {0.F, 1.F}},
+    {{-1.F, 1.F, 0.F}, {0.F,0.F,1.F}, {1.F, 1.F}},
+    {{-1.F,-1.F, 0.F}, {0.F,0.F,0.F}, {0.F, 0.F}},
+    
+    {{ 1.F, 1.F, 0.F}, {1.F,0.F,0.F}, {1.F, 0.F}},
+    {{ 1.F,-1.F, 0.F}, {0.F,1.F,0.F}, {0.F, 1.F}},
+    {{-1.F, 1.F, 0.F}, {0.F,0.F,1.F}, {1.F, 1.F}},
+    {{-1.F,-1.F, 0.F}, {0.F,0.F,0.F}, {0.F, 0.F}}
 };
 
 #undef ENUM_FIRST

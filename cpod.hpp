@@ -662,10 +662,12 @@ template <typename K, typename V, typename ... OtherStuff> \
         } // remove_comments.
         
         // We don't need function macro since cpod doesn't support expssions.
-        constexpr void replace_remove_macros() {
+        template <class StrAlloc, typename ... Rest>
+        constexpr void get_macro_define_map(std::unordered_map<
+            std::string_view,
+            std::basic_string<char, std::char_traits<char>, StrAlloc>, Rest...>& macro_map) {
             out.clear();
             out.reserve(src.size());
-            std::unordered_map<std::string_view, std::string_view> macro_map;
             for (std::size_t i = 0; i != src.size(); ++i) {
                 switch (src[i]) {
                 default: out.push_back(src[i]); break;
@@ -673,21 +675,115 @@ template <typename K, typename V, typename ... OtherStuff> \
                     char *k = &src[i];
                     char *l = nullptr;
                     k = std::find_if_not(k + 1, &src[src.length()], [](auto& c) { return std::isspace(c); });
-                    if (std::memcmp(&*k, "define", 6) != 0) {
-                        msg = "Invalid macro command after #";
-                        return;
-                    }
-                    k = std::find_if_not(k + 6, &src[src.length()], [](auto& c) { return std::isspace(c); });
-                    l = std::find_if(k, &src[src.length()], [](auto& c) { return std::isspace(c); });
-                    const std::string_view macro_key(k, l - k);
+                    const char* cmd_begin = &*k;
 
-                    k = std::find_if_not(l, &src[src.length()], [](auto& c) { return std::isspace(c); });
-                    l = std::find_if(k, &src[src.length()], [](auto& c) { return c == '\n'; });
-                    const std::string_view macro_value(k, l - k);
-                    macro_map.insert(std::make_pair(macro_key, macro_value));
-                    
-                    i += (l - &src[i]);
+                    // Read key value pair from define.
+                    if (std::memcmp(cmd_begin, "define", 6) == 0) {
+                        k = std::find_if_not(k + 6, &src[src.length()], [](auto& c) { return std::isspace(c); });
+                        l = std::find_if(k, &src[src.length()], [](auto& c) { return std::isspace(c); });
+                        const std::string_view macro_key(k, l - k);
+
+                        k = std::find_if_not(l, &src[src.length()], [](auto& c) { return std::isspace(c); });
+                        // LF mode. CR LF mode is not supported. make sure your source file is using LF new line.
+                        l = std::find_if(k, &src[src.length()], [](auto& c) { return c == '\n' && (&c)[-1] != '\\'; });
+                        std::basic_string<char, std::char_traits<char>, StrAlloc> macro_value(k, l - k);
+                        std::erase_if(macro_value, [](auto& c) { return c == '\\' && (&c)[1] == '\n'; });
+                        std::erase_if(macro_value, [](auto& c) { return c == '\n'; });
+                        macro_map.insert(std::make_pair(macro_key, macro_value));
+                        i += (l - &src[i]);
+                    } else {
+                        out.push_back(src[i]);
+                    }
                 } break;
+                }
+            }
+        }
+
+        template <class StrAlloc, typename ... Rest>
+        static constexpr void expand_macro_value(std::unordered_map<
+            std::string_view,
+            std::basic_string<char, std::char_traits<char>, StrAlloc>, Rest...>& macro_map,
+            std::string_view                                                     key) {
+            auto& value = macro_map[key];
+            for (auto it = value.begin(); it != value.end(); ++it) {
+                switch (*it) {
+                default: break;
+                case 'a': case 'b': case 'c': case 'd': case 'e': case 'f':
+                case 'g': case 'h': case 'i': case 'j': case 'k': case 'l':
+                case 'm': case 'n': case 'o': case 'p': case 'q': case 's':
+                case 't': case 'u': case 'v': case 'w': case 'x': case 'y': case 'z':
+                case 'A': case 'B': case 'C': case 'D': case 'E': case 'F':
+                case 'G': case 'H': case 'I': case 'J': case 'K': case 'L':
+                case 'M': case 'N': case 'O': case 'P': case 'Q': case 'S':
+                case 'T': case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z':
+                case '_': {
+                    auto ed = std::find_if_not(it, value.end(), [](auto& c) { return std::isalnum(c) || std::isdigit(c) || c == '_'; });
+                    std::string_view found_key(&*it, ed - it);
+                    if (macro_map.contains(found_key)) {
+                        const std::size_t delta = it - value.begin();
+                        value.replace(it, ed, macro_map[found_key]);
+                        it = value.begin() + delta - 1;
+                    } else {
+                        it += ed - it - 1;
+                    }
+                } break;
+                }
+            }
+        }
+
+        template <class StrAlloc, typename ... Rest>
+        constexpr void expand_conditional_macros(std::unordered_map<
+            std::string_view,
+            std::basic_string<char, std::char_traits<char>, StrAlloc>, Rest...>& macro_map) {
+            out.clear();
+            out.reserve(src.size());
+
+            bool is_inside_check_scope = false;
+            bool is_ifdef              = false;
+            bool is_defined            = false;
+
+            for (auto it = src.begin(); it != src.end(); ++it) {
+                switch (*it) {
+                default:
+                    if (!is_inside_check_scope || (is_inside_check_scope && is_ifdef == is_defined)) {
+                        out.push_back(*it);
+                    } break;
+                case '#': {
+                    auto j = std::find_if_not(it + 1, src.end(), [](auto& c) { return std::isspace(c); });
+                    auto k = std::find_if(j, src.end(), [](auto& c) { return std::isspace(c); });
+                    std::string_view cmd(&*j, k - j);
+                    if (cmd == "ifdef" || cmd == "ifndef") {
+                        j = std::find_if_not(k, src.end(), [](auto& c) { return std::isspace(c); });
+                        k = std::find_if(j, src.end(), [](auto& c) { return std::isspace(c); });
+                        std::string_view key(&*j, k - j);
+                        is_inside_check_scope = true;
+                        is_ifdef              = cmd == "ifdef";
+                        is_defined            = macro_map.contains(key);
+                    }
+                    else if (cmd == "endif") {
+                        is_inside_check_scope = false;
+                        is_defined            = false;
+                        is_ifdef              = false;
+                    }
+                    k = std::find(k, src.end(), '\n');
+                    it = k;
+                    if (it == src.end()) {
+                        --it;
+                    }
+                } break;
+                }
+            }
+        }
+
+        template <class StrAlloc, typename ... Rest>
+        constexpr void replace_remove_macros(const std::unordered_map<
+            std::string_view,
+            std::basic_string<char, std::char_traits<char>, StrAlloc>, Rest...>& macro_map) {
+            out.clear();
+            out.reserve(src.size());
+            for (std::size_t i = 0; i != src.size(); ++i) {
+                switch (src[i]) {
+                default: out.push_back(src[i]); break;
                 case 'a': case 'b': case 'c': case 'd': case 'e': case 'f':
                 case 'g': case 'h': case 'i': case 'j': case 'k': case 'l':
                 case 'm': case 'n': case 'o': case 'p': case 'q': case 's':
@@ -701,7 +797,7 @@ template <typename K, typename V, typename ... OtherStuff> \
                     k = std::find_if_not(&src[i], &src[src.length()], [](auto& c) { return std::isalnum(c) || std::isdigit(c) || c == ':' || c == '_'; });
                     std::string_view key(&src[i], k - &src[i]);
                     if (macro_map.contains(key)) {
-                        out.append(macro_map[key]);
+                        out.append(macro_map.at(key));
                     } else {
                         out.append(key);
                     }
@@ -1050,7 +1146,7 @@ template <typename K, typename V, typename ... OtherStuff> \
         cpp_subset_compiler compiler(std::move(content_));
         std::vector<std::string_view> token_list;
         compiler.remove_comments();            compiler.src = compiler.out;
-        compiler.replace_remove_macros();      compiler.src = compiler.out;
+        // compiler.replace_remove_macros();      compiler.src = compiler.out;
         compiler.normalize_string_literals();  compiler.src = compiler.out;
         compiler.tokenize_source(std::back_inserter(token_list));
         compiler.generate_byte_code(token_list);

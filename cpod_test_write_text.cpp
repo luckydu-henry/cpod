@@ -52,4 +52,36 @@ int main(int argc, char** argv) {
     out_text << "#include <string>\n#include <set>\n";
     out_text << arch.content();
     out_text.close();
+    
+//     std::string cpod_src = R"(
+// #define A "World!"
+// #define B "Hello" A A A
+// #define C "Henry" B
+// #define D "What's Up!" C C
+//
+//
+// std::string q = D;
+//
+// #ifndef C
+// std::string t = C;
+// #endif
+//
+//  
+// )";
+//     cpod::cpp_subset_compiler compiler(cpod_src);
+//     std::unordered_map<std::string_view, std::string> macro_map;
+//     
+//     compiler.get_macro_define_map(macro_map);
+//     std::string out_source = std::move(compiler.src);
+//     
+//     compiler.src = compiler.out; compiler.expand_conditional_macros(macro_map);
+//     compiler.src = compiler.out;
+//
+//     for (auto& i : macro_map) {
+//         cpod::cpp_subset_compiler::expand_macro_value(macro_map, i.first);
+//     }
+//     
+//     compiler.replace_remove_macros(macro_map);
+//
+//     std::cout << compiler.out << std::endl;
 }
