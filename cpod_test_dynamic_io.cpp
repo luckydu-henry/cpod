@@ -41,7 +41,7 @@ int main() {
     std::string   cleaner_source;
     std::string   source_line;
     while (std::getline(source_file, source_line)) {
-        if (!(source_line[0] == '#' && source_line[1] != 'd')) {
+        if (std::memcmp(source_line.c_str(), "#include", 8) != 0) {
             source_line.push_back('\n');
             cleaner_source += source_line;
         }
@@ -51,7 +51,12 @@ int main() {
     
     // Compiler will turn text to binary so that we can read data much faster.
     // This step is required because reader can not read text data.
-    auto msg = arch.compile_content_default();
+    // You can add custom macros in this step like below (strings are required to be quoted with " just like how you do in raw C++ code)
+    auto msg = arch.compile_content_default({
+        // With this line added mesh name will have this VER_1_0_0 suffix.
+        // Comment this the version suffix will no more exist.
+        {"MESH_VERSION_TAG", "\"VER_1_0_0\""}
+    });
 
     // Default binary archive has no any metadata (header/author...)
     // Add metadata as your will.

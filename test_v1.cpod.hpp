@@ -39,10 +39,10 @@
 ///         type name[len] array syntax                (Use std::vector for dynamic array and std::array for fixed size array).
 ///         struct/class                               (Will have future support).
 ///         namespace syntax                           (Definitely will have in the future).
-///         separate string e.g. "A""B" == "AB"        (Not a very important feature, maybe will have but use R"()" string for now).
-///         
-/// !!!! What's more to let macro preprocessor runs correctly, you must use LF text mode, CRLF may have bugs !!!
-/// 
+///
+/// Macro now only supports ifdef endif and ifndef endif, elifdef/elifndef/else are not supported yet.
+/// Don't have macro names inside a string e.g. if you have a macro 'A' then you can no longer have A inside a string but words
+/// with A like "Apple" or "Actually" are still available you just can't have 'A' itself.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///
 
@@ -64,13 +64,22 @@
 #define ENUM_THIRD  3
 #define ENUM_FOURTH 4
 
-// Since there are no expressions inside cpod, using typedef and macro have no much difference, macros can even be a lot
-// more flexible, so use this to do complex type aliasing.
-// But now I haven't supported recursive macro yet, will have it in the future.
-#define position_color_uv_vertex_type std::tuple<std::array<float, 3>, std::array<float, 3>,  std::array<float, 2>>
+#define VECTOR3_TYPE std::array<float, 3>
+#define VECTOR2_TYPE std::array<float, 2>
 
+// Since there are no expressions inside cpod, using typedef and macro have no much difference, macros can even be a lot more flexible, so use this to do complex type aliasing.
+#define position_color_uv_vertex_type std::tuple<\
+    VECTOR3_TYPE, VECTOR3_TYPE, VECTOR2_TYPE>
+
+#ifndef MESH_VERSION_TAG
 static inline const
 std::string mesh_name = "Mesh_Square";
+#endif
+
+#ifdef MESH_VERSION_TAG
+static inline const
+std::string mesh_name = "Mesh_Square_" MESH_VERSION_TAG ;
+#endif
 
 static inline const
 int  enum_number = ENUM_FOURTH;

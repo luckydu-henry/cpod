@@ -91,7 +91,7 @@ namespace cpod {
         constexpr std::string_view    content() const { return content_; }
 
         // Compile writes compiled code stream to content_.
-        constexpr std::string         compile_content_default() noexcept;
+        inline    std::string         compile_content_default(std::initializer_list<std::pair<std::string_view, std::string>> init_macro_map = {}) noexcept;
 
         template <class Ty>
         constexpr std::string::const_iterator find_variable_begin(std::string_view var_name);
@@ -862,6 +862,30 @@ template <typename K, typename V, typename ... OtherStuff> \
             } // for loop
         } // normalize_string
 
+        constexpr void combine_string_literals() noexcept {
+            out.clear();
+            out.reserve(src.size());
+            for (std::size_t i = 0; i != src.size(); ++i) {
+                switch (src[i]) {
+                default:  out.push_back(src[i]); break;
+                case ')':
+                    if (src[i + 1] == '\"') {
+                        std::size_t j = src.find("\"(", i + 2);
+                        std::size_t k = src.find(';', i + 2);
+                        if (k < j || j == std::string_view::npos) {
+                            out.push_back(src[i]);
+                            out.push_back(src[i + 1]);
+                            i = k - 1;
+                        } else {
+                            i = j + 1;
+                        }
+                    } else {
+                        out.push_back(src[i]);
+                    } break;
+                }
+            }
+        }
+
         // This step must after remove comment and normalize string.
         template <typename Iter>
         constexpr void tokenize_source(Iter it) noexcept {
@@ -1142,12 +1166,25 @@ template <typename K, typename V, typename ... OtherStuff> \
         throw std::runtime_error("Error, Can not find variable with desired type and name.");
     }
     
-    constexpr std::string archive::compile_content_default() noexcept {
+    inline std::string archive::compile_content_default(std::initializer_list<std::pair<std::string_view, std::string>> init_macro_map) noexcept {
         cpp_subset_compiler compiler(std::move(content_));
-        std::vector<std::string_view> token_list;
-        compiler.remove_comments();            compiler.src = compiler.out;
-        // compiler.replace_remove_macros();      compiler.src = compiler.out;
-        compiler.normalize_string_literals();  compiler.src = compiler.out;
+        std::vector<std::string_view>                     token_list;
+        std::unordered_map<std::string_view, std::string> macro_map(init_macro_map.begin(), init_macro_map.end());
+
+        compiler.remove_comments(); compiler.src = compiler.out;             
+        compiler.get_macro_define_map(macro_map);
+        std::string out_source = std::move(compiler.src);
+
+        for (auto& i : macro_map) {
+            cpp_subset_compiler::expand_macro_value(macro_map, i.first);
+        }
+
+        compiler.src = compiler.out; compiler.expand_conditional_macros(macro_map);
+        compiler.src = compiler.out; compiler.replace_remove_macros(macro_map);
+        compiler.src = compiler.out; compiler.normalize_string_literals();
+        compiler.src = compiler.out; compiler.combine_string_literals();
+        compiler.src = compiler.out;
+        
         compiler.tokenize_source(std::back_inserter(token_list));
         compiler.generate_byte_code(token_list);
         content_ = compiler.out;
