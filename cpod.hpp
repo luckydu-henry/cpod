@@ -53,7 +53,7 @@ namespace cpod {
     class  archive;
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///                                   Variable view implementation
+    ///                                   Basic facilities (Views)
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
     
     template <class Ty>
@@ -69,9 +69,27 @@ namespace cpod {
         name(n), value(&v), flag(f) {}
     };
 
+    struct output_format_view {
+        std::string content;
+        constexpr explicit output_format_view(const std::string& str)
+        : content(str) {}
+    };
+    
+    struct comment_view : output_format_view {
+        constexpr explicit comment_view(std::string_view c)
+        : output_format_view(std::string("//") + std::string(c) + "\n") {}
+    };
+
+    struct macro_define_view : output_format_view {
+        constexpr explicit macro_define_view(std::string_view k, std::string_view v)
+        : output_format_view(std::string("#define ") + std::string(k) + " " + std::string(v) + "\n") {}
+    };
+
     // For convenient construction.
     template <class Ty>
     using var = variable_view<Ty>;
+    using com = comment_view;
+    using def = macro_define_view;
 
     // This demonstrates what a basic serializer should contain.
     template <class Ty>
@@ -82,13 +100,25 @@ namespace cpod {
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
     
     class archive {
-        std::string content_;
+        std::string          content_;
+        std::size_t          base_indent_count_;
     public:
-        archive() : content_() {}
-        archive(std::string_view c) : content_(c) {}
+        
+        // Writer mode
+        archive(std::size_t bic = 0, char bi = ' ') : content_(), base_indent_count_(bic) {}
+        // Reader mode
+        archive(std::string_view c) : content_(c), base_indent_count_(0) {}
         
         constexpr std::string&        content()       { return content_; }
         constexpr std::string_view    content() const { return content_; }
+
+        constexpr std::size_t&        indent()        { return base_indent_count_; }
+        constexpr std::size_t         indent()  const { return base_indent_count_; }
+
+        constexpr void append_indent() {
+            std::string buf(base_indent_count_, ' ');
+            content_.append(buf);
+        }
 
         // Compile writes compiled code stream to content_.
         inline    std::string         compile_content_default(std::initializer_list<std::pair<std::string_view, std::string>> init_macro_map = {}) noexcept;
@@ -98,7 +128,14 @@ namespace cpod {
 
         template <class Ty>
         constexpr archive& operator<<(variable_view<Ty> v) {
-            serializer<Ty>{}(content_, v.name, *v.value, v.flag);
+            append_indent();
+            serializer<Ty>{}(*this, v.name, *v.value, v.flag);
+            return *this;
+        }
+
+        constexpr archive& operator<<(const output_format_view& v) {
+            append_indent();
+            content_.append(v.content);
             return *this;
         }
 
@@ -463,6 +500,9 @@ template <typename K, typename V, typename ... OtherStuff> \
 
     template <class Ty>
     concept std_type = details::std_template_library_type_traits<Ty>::value || details::std_basic_type<Ty>;
+
+    template <class Ty>
+    concept structure_type = std::is_class_v<Ty>;
     
     // Further type string all use this.
     template <typename Ty>
@@ -1192,16 +1232,40 @@ template <typename K, typename V, typename ... OtherStuff> \
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///                                Structure serializer helper
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    // Make user custom class's serialization easier.
+    struct auto_structure_description_writer {
+        archive              *arch;
+        std::string_view      varname;
+
+        constexpr auto_structure_description_writer(archive& ac, std::string_view sname, std::string_view var_name):
+        arch(&ac), varname(var_name) {
+            arch->content().append("struct ");
+            arch->content().append(sname);
+            arch->content().push_back('{');
+        }
+        
+        ~auto_structure_description_writer() {
+            arch->content().push_back('}');
+            arch->content().append(varname);
+            arch->content().push_back(';');
+        }
+    };
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////
     ///                                Basic serializer specialization
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
     
     template <std_type Ty>
     struct serializer<Ty> {
-        constexpr void operator()(std::string& content, std::string_view name, const Ty& v, flag_t flag) {
+        constexpr void operator()(archive& arch, std::string_view name, const Ty& v, flag_t flag) {
             std_basic_type_text_output_formatter formatter{flag};
-            content.append(std_type_name_string<Ty>()).push_back(' ');
-            content.append(name).push_back('=');
-            content.append(std_type_value_string(v, formatter));
+            arch.append_indent();
+            arch << std_type_name_string<Ty>() << ' '
+                 << name  << '='
+                 << std_type_value_string(v, formatter);
         }
         constexpr void operator()(std::string::const_iterator& mem_begin, Ty& v, flag_t flag) {
             // Reader is much shorter and thus faster.
