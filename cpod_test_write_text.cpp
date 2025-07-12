@@ -30,26 +30,37 @@
 #include <fstream>
 #include <string_view>
 #include <format>
+
 #include "cpod.hpp"
 
+//////////////////////////////////////////////////////////////////////
+///           Below showed how to use custom structure             ///
+//////////////////////////////////////////////////////////////////////
 
-struct Vector4 {
-    float x, y, z, w;
+struct personal_info {
+    std::string           name;
+    std::string           gender;
+    uint8_t               age;
+    std::set<std::string> emails;
 };
 
 template <>
-struct cpod::serializer<Vector4> {
-    constexpr void operator()(cpod::archive& arch, std::string_view name, const Vector4& v, flag_t flag) const {
-        cpod::auto_structure_description_writer sw(arch, "Vector4", name);
-        arch.indent() += 4;
-        arch << '\n';
-        cpod::serializer<float>{}(arch, "x", v.x, flag); arch << '\n'; 
-        cpod::serializer<float>{}(arch, "y", v.y, flag); arch << '\n';
-        cpod::serializer<float>{}(arch, "z", v.z, flag); arch << '\n';
-        cpod::serializer<float>{}(arch, "w", v.w, flag); arch << '\n';
-        arch.indent() -= 4;
+struct cpod::serializer<personal_info> {
+    // Required static variable.
+    static constexpr std::string_view type_name = "personal_info";
+    constexpr void operator()(archive& arch, std::string_view name, const personal_info& v, flag_t flag) const {
+        auto_structure_description_writer<personal_info> sw(arch, name);
+        serializer<std::string>          {}(arch, "name", v.name, flag);     arch << '\n';   
+        serializer<std::string>          {}(arch, "gender", v.gender, flag); arch << '\n';
+        serializer<std::uint8_t>         {}(arch, "age", v.age, flag);       arch << '\n';
+        serializer<std::set<std::string>>{}(arch, "emails", v.emails, flag); arch << '\n';
     }
-    constexpr void operator()(std::string::const_iterator& mem_begin, Vector4& v, flag_t flag) {
+    constexpr void operator()(std::string::const_iterator& mem_begin, personal_info& v, flag_t flag) {
+        // Reader is much shorter and thus faster.
+        serializer<std::string>           {}(mem_begin, v.name, flag);
+        serializer<std::string>           {}(mem_begin, v.gender, flag);
+        serializer<std::uint8_t>          {}(mem_begin, v.age, flag);
+        serializer<std::set<std::string>> {}(mem_begin, v.emails, flag);
     }
 };
 
@@ -57,33 +68,25 @@ struct cpod::serializer<Vector4> {
 int main(int argc, char** argv) {
     cpod::archive arch;
 
-    Vector4 vec{1, 2, 3, 4};
-    
-    arch
-    << cpod::def("FIRST_MACRO", "10")
-    << cpod::com("Hello world!")
-    << cpod::var("vec", vec) << '\n'
-    << cpod::var("AInt", 10)  << '\n'
-    << cpod::com("Another comment!");
-    
+    personal_info myself = {
+        "Henry Du",
+        "Male",
+        17,
+        {"wotsukoroga94@gmail.com", "xidhyu@outlook.com"}
+    };
 
-    std::cout << arch.content() << std::endl;
+    personal_info myself_cache;
     
-    // std::string           myName        = "Henry Du";
-    // std::string           myGender      = "Male";
-    // uint8_t               myAge         = 17;
-    // std::set<std::string> myEmails = {
-    //     "wotsukoroga94@gmail.com",
-    //     "xidhyu@outlook.com"
-    // };
-    //
-    // arch << cpod::var("name", myName) << '\n'
-    //      << cpod::var("gender", myGender) << '\n'
-    //      << cpod::var("age", myAge) << '\n'
-    //      << cpod::var("emails", myEmails) << '\n';
-    //
-    // std::ofstream out_text("personal_info.cpod.hpp");
-    // out_text << "#include <string>\n#include <set>\n";
-    // out_text << arch.content();
-    // out_text.close();
+    arch << cpod::var("personal_info_0", myself);
+    
+    std::ofstream out_text("personal_info.cpod.hpp");
+    out_text << "#include <string>\n#include <set>\n";
+    out_text << arch.content();
+    out_text.close();
+
+    arch.compile_content_default();
+    arch >> cpod::var("personal_info_0", myself_cache);
+
+    // wotsukoroga94@gmail.com
+    std::cout << *myself_cache.emails.begin() << '\n';
 }
