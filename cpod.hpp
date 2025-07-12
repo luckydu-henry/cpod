@@ -1079,9 +1079,7 @@ template <typename K, typename V, typename ... OtherStuff> \
                     for (auto k = vtb; k != vte; ++n) {
                         k = compile_values_recursively(ttb, tte, std::next(k), vte, cache).second;
                     }
-                    buf.append(reinterpret_cast<const char*>(&n), sizeof(n));
-                    buf.append(cache);
-                    return std::make_pair(std::next(tte), std::next(vte));
+                    buf.append(reinterpret_cast<const char*>(&n), sizeof(n)); break;
                 // Mapping containers 
                 case 22: case 23: case 24: case 25:
                     for (auto k = vtb; k != vte; ++n) {
@@ -1089,34 +1087,27 @@ template <typename K, typename V, typename ... OtherStuff> \
                         auto p2 = compile_values_recursively(std::next(p1.first), tte, std::next(p1.second), vte, cache);
                         k = std::next(p2.second);
                     }
-                    buf.append(reinterpret_cast<const char*>(&n), sizeof(n));
-                    buf.append(cache);
-                    return std::make_pair(std::next(tte), std::next(vte));
+                    buf.append(reinterpret_cast<const char*>(&n), sizeof(n)); break;
                 // std::pair;
                 case 26: {
                     auto p1 = compile_values_recursively(ttb, tte, std::next(vtb), vte, cache);
-                    auto p2 = compile_values_recursively(std::next(p1.first), tte, std::next(p1.second), vte, cache); }
-                    buf.append(cache);
-                    return std::make_pair(std::next(tte), std::next(vte));
+                    auto p2 = compile_values_recursively(std::next(p1.first), tte, std::next(p1.second), vte, cache); } break;
                 // std::array
                 case 27:
                     // The only difference between sequential containers is this do not write n into the buffer.
                     for (auto k = vtb; k != vte;) {
                         k = compile_values_recursively(ttb, tte, std::next(k), vte, cache).second;
-                    }
-                    buf.append(cache);
-                    return std::make_pair(std::next(tte), std::next(vte));
+                    } break;
                 // std::tuple.
                 case 28:
                     for (Iter k = vtb, l = ttb;k != vte && l != tte;) {
                         auto c = compile_values_recursively(l, tte, std::next(k), vte, cache);
                         l = std::next(c.first);
                         k = c.second;
-                    }
-                    buf.append(cache);
-                    return std::make_pair(std::next(tte), std::next(vte));
+                    } break;
                 }
                 // Common operation that writes cache to the buffer and move forward iterator.
+                buf.append(cache);
                 return std::make_pair(std::next(tte), std::next(vte));
             }
             if (tid == 29 || tid == 30) {
@@ -1167,51 +1158,46 @@ template <typename K, typename V, typename ... OtherStuff> \
             out.clear();
             out.reserve(tokens.size());
             for (auto t = tokens.begin(); t != tokens.end(); ++t) {
-                // Ignore struct for now.
                 if (auto i = std::find(std::begin(keywords), std::end(keywords), *t); i != std::end(keywords)) {
+                    std::string              value_cache;
+                    std::string              variable_name_cache;
+                    std::string              type_cache;
+                    decltype(tokens.end())   semicolumn;
+                    
                     if (*t == "struct" || *t == "class") {
-                        std::string type_cache;
-                        std::string variable_name_cache;
-                        std::string value_cache;
-                        
                         type_cache.push_back('\xFF');
                         type_cache.append(*std::next(t));
                         type_cache.push_back('\0');
                         auto struct_end = find_matching_bracket<'{', '}'>(std::next(t, 2), tokens.end());
                         variable_name_cache = *std::next(struct_end);
                         variable_name_cache.push_back('\0');
-                        auto semico = std::next(struct_end, 2); 
+                        semicolumn = std::next(struct_end, 2); 
                         compile_values_recursively(t, std::next(t, 2), std::next(t, 2), struct_end, value_cache);
-                        const std::size_t offset = type_cache.size() + variable_name_cache.size() + value_cache.size() + 1;
-                        out.append(reinterpret_cast<const char*>(&offset), sizeof(std::size_t));
-                        out.append(type_cache);
-                        out.append(variable_name_cache);
-                        out.append(value_cache);
-                        t = semico;
                     }
                     else {
-                        std::string value_cache;
                         auto assign = std::find(t, tokens.end(), "=");
                         if (assign == tokens.end()) {
                             msg = "Missing assign operator (=).";
                             return;
                         }
-                        auto semico = std::find(assign, tokens.end(), ";");
-                        if (semico == tokens.end()) {
+                        semicolumn = std::find(assign, tokens.end(), ";");
+                        if (semicolumn == tokens.end()) {
                             msg = "Missing ; after expression.";
                             return;
                         }
-                        std::string type_cache = compile_type_name(t, std::prev(assign));
-                        compile_values_recursively(t, std::prev(assign), std::next(assign), semico, value_cache);
-                        const std::size_t offset = type_cache.size() + std::prev(assign)->size() + value_cache.size() + 1;
-                        out.append(reinterpret_cast<const char*>(&offset), sizeof(std::size_t));
-                        out.append(type_cache);
-                        out.append(*std::prev(assign)).push_back('\0');
-                        out.append(value_cache);
-                        t = semico;
+                        type_cache = compile_type_name(t, std::prev(assign));
+                        variable_name_cache = *std::prev(assign);
+                        variable_name_cache.push_back('\0');
+                        compile_values_recursively(t, std::prev(assign), std::next(assign), semicolumn, value_cache);
+                        t = semicolumn;
                     }
-                } else {
-                    continue;
+                    
+                    t = semicolumn;
+                    const std::size_t offset = type_cache.size() + variable_name_cache.size() + value_cache.size();
+                    out.append(reinterpret_cast<const char*>(&offset), sizeof(std::size_t));
+                    out.append(type_cache);
+                    out.append(variable_name_cache);
+                    out.append(value_cache);
                 }
             } // for loop
             constexpr std::size_t end_mark = 0;
