@@ -53,7 +53,7 @@ namespace cpod {
     class  archive;
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///                                   Basic facilities (Views)
+    ///                                   Variable view implementation
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
     
     template <class Ty>
@@ -100,8 +100,8 @@ namespace cpod {
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
     
     class archive {
-        std::string          content_;
-        std::size_t          base_indent_count_;
+        std::string   content_;
+        std::size_t   base_indent_count_;
     public:
         
         // Writer mode
@@ -112,6 +112,12 @@ namespace cpod {
         constexpr std::string&        content()       { return content_; }
         constexpr std::string_view    content() const { return content_; }
 
+        // Compile writes compiled code stream to content_.
+        inline    std::string         compile_content_default(std::initializer_list<std::pair<std::string_view, std::string>> init_macro_map = {}) noexcept;
+
+        template <class Ty>
+        constexpr std::string::const_iterator find_variable_begin(std::string_view var_name);
+
         constexpr std::size_t&        indent()        { return base_indent_count_; }
         constexpr std::size_t         indent()  const { return base_indent_count_; }
 
@@ -119,12 +125,6 @@ namespace cpod {
             std::string buf(base_indent_count_, ' ');
             content_.append(buf);
         }
-
-        // Compile writes compiled code stream to content_.
-        inline    std::string         compile_content_default(std::initializer_list<std::pair<std::string_view, std::string>> init_macro_map = {}) noexcept;
-
-        template <class Ty>
-        constexpr std::string::const_iterator find_variable_begin(std::string_view var_name);
 
         template <class Ty>
         constexpr archive& operator<<(variable_view<Ty> v) {
@@ -627,29 +627,17 @@ template <typename K, typename V, typename ... OtherStuff> \
         std::string src;
         std::string msg;
         std::string out;
-
+        
         static constexpr std::string_view keywords[255] = {
             "int8_t",       "uint8_t",   "int16_t",        "uint16_t",
             "int",          "uint32_t",  "int64_t",        "uint64_t",
             "float",        "double",    "bool",           "std::string",    
             // Containers.
-            "std::vector",        "std::deque",              "std::list",   "std::forward_list", "std::hive",          "std::set",                "std::multiset",
-            "std::unordered_set", "std::unordered_multiset", "std::map",    "std::multimap",     "std::unordered_map", "std::unordered_multimap",
-            "std::pair",          "std::array",              "std::tuple",
-
-            // Change these to your own keywords if you have.
-            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-            "", "", "", "", "", "", "", "", "",
-
-            // Last two are always struct and class.
+            "std::vector", "std::deque",  "std::list", "std::forward_list", "std::hive", "std::set", "std::multiset",
+            "std::unordered_set", "std::unordered_multiset", "std::map", "std::multimap", "std::unordered_map", "std::unordered_multimap",
+            "std::pair",           "std::array",             "std::tuple",
+            
+            // Structure.
             "struct", "class"
         };
 
@@ -930,7 +918,7 @@ template <typename K, typename V, typename ... OtherStuff> \
                 case ')':
                     if (src[i + 1] == '\"') {
                         std::size_t j = src.find("\"(", i + 2);
-                        std::size_t k = src.find_first_of(",;}", i + 2);
+                        std::size_t k = src.find_first_of(";,}", i + 2);
                         if (k < j || j == std::string_view::npos) {
                             out.push_back(src[i]);
                             out.push_back(src[i + 1]);
@@ -1060,40 +1048,12 @@ template <typename K, typename V, typename ... OtherStuff> \
         constexpr auto find_matching_bracket(Iter b, Iter e) {
             std::size_t brace_count = 1;
             auto i = std::next(b);
-            for (; brace_count != 0 && i != e; ++i) {
+            for (; i != e && brace_count != 0; ++i) {
                 if ((*i)[0] == B1) { ++brace_count; }
-                if ((*i)[0] == B2) {
-                    --brace_count;
-                }
+                if ((*i)[0] == B2) { --brace_count; }
             }
             return std::prev(i);
         }
-
-        template <class Iter>
-        static constexpr std::string compile_std_type_name(Iter ttb, Iter tte) {
-            std::string buf;
-            for (auto it = ttb; it != tte; ++it) {
-                if      (*it == ",") { buf.push_back(','); }
-                else if (*it == "<") { buf.push_back('<'); }
-                else if (*it == ">") { buf.push_back('>'); }
-                else {
-                    // For array size.
-                    if (std::all_of(it->begin(), it->end(), [](auto& c) {
-                        return std::isdigit(static_cast<int>(c));
-                    })) {
-                        std::size_t n = 0;
-                        std::from_chars(&*it->begin(), (&*it->rbegin()) + 1, n);
-                        buf.append(reinterpret_cast<const char*>(&n), sizeof(std::size_t));
-                    } else {
-                        const std::uint8_t t = static_cast<std::uint8_t>(std::find(std::begin(keywords), std::end(keywords), *it) - std::begin(keywords)) + 1;
-                        buf.push_back(*reinterpret_cast<const char*>(&t));
-                    }
-                }
-            }
-            buf.push_back('\0');
-            return buf;
-        }
-        
 
         template <class Iter>
         constexpr auto compile_values_recursively(Iter ttb, Iter tte, Iter vtb, Iter vte, std::string& buf) {
@@ -1119,7 +1079,9 @@ template <typename K, typename V, typename ... OtherStuff> \
                     for (auto k = vtb; k != vte; ++n) {
                         k = compile_values_recursively(ttb, tte, std::next(k), vte, cache).second;
                     }
-                    buf.append(reinterpret_cast<const char*>(&n), sizeof(n)); break;
+                    buf.append(reinterpret_cast<const char*>(&n), sizeof(n));
+                    buf.append(cache);
+                    return std::make_pair(std::next(tte), std::next(vte));
                 // Mapping containers 
                 case 22: case 23: case 24: case 25:
                     for (auto k = vtb; k != vte; ++n) {
@@ -1127,32 +1089,37 @@ template <typename K, typename V, typename ... OtherStuff> \
                         auto p2 = compile_values_recursively(std::next(p1.first), tte, std::next(p1.second), vte, cache);
                         k = std::next(p2.second);
                     }
-                    buf.append(reinterpret_cast<const char*>(&n), sizeof(n)); break;
+                    buf.append(reinterpret_cast<const char*>(&n), sizeof(n));
+                    buf.append(cache);
+                    return std::make_pair(std::next(tte), std::next(vte));
                 // std::pair;
                 case 26: {
                     auto p1 = compile_values_recursively(ttb, tte, std::next(vtb), vte, cache);
-                    auto p2 = compile_values_recursively(std::next(p1.first), tte, std::next(p1.second), vte, cache); } break;
+                    auto p2 = compile_values_recursively(std::next(p1.first), tte, std::next(p1.second), vte, cache); }
+                    buf.append(cache);
+                    return std::make_pair(std::next(tte), std::next(vte));
                 // std::array
                 case 27:
                     // The only difference between sequential containers is this do not write n into the buffer.
                     for (auto k = vtb; k != vte;) {
                         k = compile_values_recursively(ttb, tte, std::next(k), vte, cache).second;
-                    } break;
+                    }
+                    buf.append(cache);
+                    return std::make_pair(std::next(tte), std::next(vte));
                 // std::tuple.
                 case 28:
                     for (Iter k = vtb, l = ttb;k != vte && l != tte;) {
                         auto c = compile_values_recursively(l, tte, std::next(k), vte, cache);
                         l = std::next(c.first);
                         k = c.second;
-                    } break;
-                // Add your own containers here if you need.
+                    }
+                    buf.append(cache);
+                    return std::make_pair(std::next(tte), std::next(vte));
                 }
                 // Common operation that writes cache to the buffer and move forward iterator.
-                buf.append(cache);
                 return std::make_pair(std::next(tte), std::next(vte));
             }
-            // Custom structure type.
-            if (tid == 0xFE || tid == 0xFF) {
+            if (tid == 29 || tid == 30) {
                 ttb = std::next(ttb, 3);
                 for (auto k = ttb; k != vte; ++k) {
                     if (*k != "struct" && *k != "class") {
@@ -1169,6 +1136,31 @@ template <typename K, typename V, typename ... OtherStuff> \
                 return std::make_pair(std::next(tte), std::next(vte));
             }
         }
+
+        template <class Iter>
+        static constexpr std::string compile_type_name(Iter ttb, Iter tte) {
+            std::string buf;
+            for (auto it = ttb; it != tte; ++it) {
+                if      (*it == ",") { buf.push_back(','); }
+                else if (*it == "<") { buf.push_back('<'); }
+                else if (*it == ">") { buf.push_back('>'); }
+                else {
+                    // For array size.
+                    if (std::all_of(it->begin(), it->end(), [](auto& c) {
+                        return std::isdigit(static_cast<int>(c));
+                    })) {
+                        std::size_t n = 0;
+                        std::from_chars(&*it->begin(), (&*it->rbegin()) + 1, n);
+                        buf.append(reinterpret_cast<const char*>(&n), sizeof(std::size_t));
+                    } else {
+                        const std::uint8_t t = static_cast<std::uint8_t>(std::find(std::begin(keywords), std::end(keywords), *it) - std::begin(keywords)) + 1;
+                        buf.push_back(*reinterpret_cast<const char*>(&t));
+                    }
+                }
+            }
+            buf.push_back('\0');
+            return buf;
+        }
         
         template <class Container>
         constexpr void generate_byte_code(const Container& tokens) {
@@ -1177,10 +1169,11 @@ template <typename K, typename V, typename ... OtherStuff> \
             for (auto t = tokens.begin(); t != tokens.end(); ++t) {
                 // Ignore struct for now.
                 if (auto i = std::find(std::begin(keywords), std::end(keywords), *t); i != std::end(keywords)) {
-                    std::string type_cache;
-                    std::string variable_name_cache;
-                    std::string value_cache;
                     if (*t == "struct" || *t == "class") {
+                        std::string type_cache;
+                        std::string variable_name_cache;
+                        std::string value_cache;
+                        
                         type_cache.push_back('\xFF');
                         type_cache.append(*std::next(t));
                         type_cache.push_back('\0');
@@ -1189,9 +1182,15 @@ template <typename K, typename V, typename ... OtherStuff> \
                         variable_name_cache.push_back('\0');
                         auto semico = std::next(struct_end, 2); 
                         compile_values_recursively(t, std::next(t, 2), std::next(t, 2), struct_end, value_cache);
+                        const std::size_t offset = type_cache.size() + variable_name_cache.size() + value_cache.size() + 1;
+                        out.append(reinterpret_cast<const char*>(&offset), sizeof(std::size_t));
+                        out.append(type_cache);
+                        out.append(variable_name_cache);
+                        out.append(value_cache);
                         t = semico;
                     }
                     else {
+                        std::string value_cache;
                         auto assign = std::find(t, tokens.end(), "=");
                         if (assign == tokens.end()) {
                             msg = "Missing assign operator (=).";
@@ -1202,17 +1201,17 @@ template <typename K, typename V, typename ... OtherStuff> \
                             msg = "Missing ; after expression.";
                             return;
                         }
-                        type_cache    = compile_std_type_name(t, std::prev(assign));
-                        variable_name_cache = *std::prev(assign);
-                        variable_name_cache.push_back('\0');
+                        std::string type_cache = compile_type_name(t, std::prev(assign));
                         compile_values_recursively(t, std::prev(assign), std::next(assign), semico, value_cache);
+                        const std::size_t offset = type_cache.size() + std::prev(assign)->size() + value_cache.size() + 1;
+                        out.append(reinterpret_cast<const char*>(&offset), sizeof(std::size_t));
+                        out.append(type_cache);
+                        out.append(*std::prev(assign)).push_back('\0');
+                        out.append(value_cache);
                         t = semico;
                     }
-                    const std::size_t offset = type_cache.size() + variable_name_cache.size() + value_cache.size() + 1;
-                    out.append(reinterpret_cast<const char*>(&offset), sizeof(std::size_t));
-                    out.append(type_cache);
-                    out.append(variable_name_cache);
-                    out.append(value_cache);
+                } else {
+                    continue;
                 }
             } // for loop
             constexpr std::size_t end_mark = 0;
@@ -1226,7 +1225,7 @@ template <typename K, typename V, typename ... OtherStuff> \
     
     template <class Ty>
     constexpr std::string::const_iterator archive::find_variable_begin(std::string_view var_name) {
-        // Get search tag.
+        // Search tag.
         std::string type_and_name;
         if constexpr (std_type<Ty>) {
             type_and_name = std_type_name_string<Ty>(true);
@@ -1243,9 +1242,9 @@ template <typename K, typename V, typename ... OtherStuff> \
             // A very weird technique I developed. 
             offset_block += sizeof(std::size_t);
             if (std::equal(type_and_name.cbegin(), type_and_name.cend(), offset_block)) {
-                return offset_block + type_and_name.size(); // Locate to the beginning of data part.
+                return offset_block + type_and_name.size();
             }
-            offset_block += static_cast<std::ptrdiff_t>(offset);
+            offset_block += static_cast<std::size_t>(offset);
         }
         throw std::runtime_error("Error, Can not find variable with desired type and name.");
     }
@@ -1309,7 +1308,7 @@ template <typename K, typename V, typename ... OtherStuff> \
             arch->content().push_back(';');
         }
     };
-
+    
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
     ///                                Basic serializer specialization
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1329,4 +1328,5 @@ template <typename K, typename V, typename ... OtherStuff> \
             details::iterate_std_template_stuff_impl<Ty>{}(mem_begin, reader, v, 0);
         }
     };
+    
 }

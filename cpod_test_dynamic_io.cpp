@@ -82,10 +82,9 @@ int main() {
     // Empty means no error message.
     if (msg.empty()) {
         try {
-            arch
-            >> cpod::var("position_color_uv_vertices", position_color_uv_vertices)
-            >> cpod::var("mesh_name", mesh_name)
-            >> cpod::var("enum_number",  enum_number);
+            arch >> cpod::var("position_color_uv_vertices", position_color_uv_vertices);
+            arch >> cpod::var("mesh_name", mesh_name);
+            arch >> cpod::var("enum_number",  enum_number);
             
             std::cout << "Read mesh : " << mesh_name << '\n';
             std::cout << "---------------------------------------------\n";
