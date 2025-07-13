@@ -29,8 +29,6 @@
 #include <string>
 #include <fstream>
 #include <string_view>
-#include <format>
-
 #include "cpod.hpp"
 
 //////////////////////////////////////////////////////////////////////
@@ -77,10 +75,10 @@ int main(int argc, char** argv) {
 
     personal_info myself_cache;
     
-    arch << cpod::var("personal_info_0", myself);
+    arch << cpod::var("personal_info_0", myself) << '\n';
     
     std::ofstream out_text("personal_info.cpod.hpp");
-    out_text << "#include <string>\n#include <set>\n";
+    out_text << "#include <string>\n#include <set>\n#include <vector>\n";
     out_text << arch.content();
     out_text.close();
 

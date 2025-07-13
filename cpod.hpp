@@ -34,6 +34,7 @@
 #include <tuple>
 #include <type_traits>
 #include <charconv>  // from_chars and to_chars
+#include <format>    // for format api.
 
 // Container support headers.
 #include <array>
@@ -77,19 +78,28 @@ namespace cpod {
     
     struct comment_view : output_format_view {
         constexpr explicit comment_view(std::string_view c)
-        : output_format_view(std::string("//") + std::string(c) + "\n") {}
+        : output_format_view(std::format("//{:s}\n", c)) {}
     };
 
     struct macro_define_view : output_format_view {
         constexpr explicit macro_define_view(std::string_view k, std::string_view v)
-        : output_format_view(std::string("#define ") + std::string(k) + " " + std::string(v) + "\n") {}
+        : output_format_view(std::format("#define {:s} {:s}\n", k, v)) {}
+    };
+
+    struct auto_indent_text_view : output_format_view {
+        template <typename ... Args>
+        constexpr explicit auto_indent_text_view(std::string_view t, const Args& ... args)
+        : output_format_view(std::vformat(t, std::make_format_args(args...))) {}
     };
 
     // For convenient construction.
     template <class Ty>
     using var = variable_view<Ty>;
+
+    // Format views.
     using com = comment_view;
     using def = macro_define_view;
+    using txt = auto_indent_text_view;
 
     // This demonstrates what a basic serializer should contain.
     template <class Ty>
@@ -532,6 +542,9 @@ template <typename K, typename V, typename ... OtherStuff> \
         buffer.back() = ';';
         return buffer;
     }
+
+    template <class Ty>
+    constexpr auto std_text_value_of(const Ty& value);
 
     typedef enum std_basic_io_flag{
         integer_binary            = 1 << 1,
@@ -1012,9 +1025,10 @@ template <typename K, typename V, typename ... OtherStuff> \
                 return result;
             }
             if constexpr (std::is_same_v<Ty, bool>) {
-                if (value == "true") { return true; }
+                if (value == "true")  { return true; }
                 if (value == "false") { return false; }
             }
+            return Ty{};
         }
         
         static constexpr void compile_basic_type_to_buffer(std::string_view type, std::string_view value, std::string& buf) {
@@ -1126,6 +1140,7 @@ template <typename K, typename V, typename ... OtherStuff> \
                 }
                 return std::make_pair(std::next(tte), std::next(vte));
             }
+            return std::make_pair(std::next(tte), std::next(vte));
         }
 
         template <class Iter>
@@ -1294,6 +1309,12 @@ template <typename K, typename V, typename ... OtherStuff> \
             arch->content().push_back(';');
         }
     };
+
+    template <class Ty>
+    constexpr auto std_text_value_of(const Ty& value) {
+        std_basic_type_text_output_formatter formatter{0};
+        return std_type_value_string(value, formatter);
+    }
     
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
     ///                                Basic serializer specialization

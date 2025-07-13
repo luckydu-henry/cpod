@@ -37,7 +37,6 @@
 /// And some C++ syntax are also not supported until now.
 ///         void* or any type*                         (Pointer syntax).
 ///         type name[len] array syntax                (Use std::vector for dynamic array and std::array for fixed size array).
-///         struct/class                               (Will have future support).
 ///         namespace syntax                           (Definitely will have in the future).
 ///
 /// Macro now only supports ifdef endif and ifndef endif, elifdef/elifndef/else are not supported yet.
