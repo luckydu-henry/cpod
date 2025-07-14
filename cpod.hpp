@@ -161,9 +161,11 @@ namespace cpod {
 
         template <class Ty>
         constexpr archive& operator>>(variable_view<Ty> v) {
-            auto it = find_variable_begin<Ty>(v.name);
-            serializer<Ty>{}(it, *v.value, v.flag);
-            return *this;
+            if (auto it = find_variable_begin<Ty>(v.name); it != content_.cend()) {
+                serializer<Ty>{}(it, *v.value, v.flag);
+                return *this;
+            }
+            throw std::invalid_argument("Can't find variable name!");
         }
     };
     
@@ -1247,7 +1249,7 @@ template <typename K, typename V, typename ... OtherStuff> \
             }
             offset_block += static_cast<std::size_t>(offset);
         }
-        throw std::runtime_error("Error, Can not find variable with desired type and name.");
+        return content_.cend();
     }
     
     inline std::string archive::compile_content_default(std::initializer_list<std::pair<std::string_view, std::string>> init_macro_map) noexcept {
